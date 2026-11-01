@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>창세 관측소</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+/* 레이아웃: 로비는 질문 먼저(4개의 질문 → 실험실), 그다음 직접 지켜보기(4단계). 관측 화면은 왼쪽 무대(지도 + 해설·범례 오버레이 + 재생줄 + 개입줄),
+   오른쪽 기록 패널(지금 수치 → 변화 추이 → 연대기). 의도적으로 어두운 단일 테마(천문대). */
+:root {
+  color-scheme: dark;
+  --void: #05070b;
+  --ink: #0b0e14;
+  --ink-2: #10151d;
+  --ink-3: #18202b;
+  --line: #263042;
+  --line-soft: rgba(38, 48, 66, .55);
+  --text: #ece5d4;
+  --muted: #9ba3b4;
+  --faint: #687186;
+  --brass: #d8a85b;
+  --brass-hi: #f1cb86;
+  --cyan: #84c6d2;
+  --ember: #e46a4e;
+  --leaf: #96cf88;
+  --glass: rgba(9, 12, 18, .82);
+  --on-brass: #1a1408;
+  --f-display: 'Gowun Batang', 'Nanum Myeongjo', 'Batang', serif;
+  --f-body: 'IBM Plex Sans KR', 'Malgun Gothic', 'Apple SD Gothic Neo', system-ui, sans-serif;
+  --f-mono: 'IBM Plex Mono', ui-monospace, 'Consolas', monospace;
+  --panel-w: 372px;
+}
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--ink); color: var(--text); font-family: var(--f-body); font-size: 14px; line-height: 1.55; overflow: hidden; -webkit-font-smoothing: antialiased; word-break: keep-all; overflow-wrap: break-word; }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.ico { width: 18px; height: 18px; flex: none; }
+h1, h2, h3, h4 { text-wrap: balance; }
+
+#app { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+#lobby, #observe, #lab { grid-row: 2; min-height: 0; }
+#lab { overflow-y: auto; }
+
+/* ---------- 머리줄 ---------- */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap;
+  padding-block: 9px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--line); background: var(--ink); position: relative; z-index: 6; }
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; background: none; border: 0; padding: 0; text-align: left; }
+.brand .mark { width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid var(--brass); position: relative; flex: none; }
+.brand .mark::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--brass); box-shadow: 0 0 12px var(--brass); }
+.brand .mark::after { content: ""; position: absolute; left: -5px; right: -5px; top: 12px; height: 1.5px; background: var(--brass); transform: rotate(-18deg); opacity: .7; }
+.brand h1 { font-family: var(--f-display); font-size: 20px; font-weight: 700; margin: 0; letter-spacing: .02em; line-height: 1.2; }
+.brand p { margin: 0; color: var(--muted); font-size: 12px; }
+.crumbs { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; min-width: 0; }
+.where { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.where b { font-family: var(--f-display); font-size: 17px; font-weight: 700; white-space: nowrap; }
+.where .seed { font-family: var(--f-mono); font-size: 12px; color: var(--muted); padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; }
+.crumb-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); background: var(--ink-3); border-radius: 7px; padding: 6px 11px; font-size: 13px; line-height: 1.3; white-space: nowrap; }
+.btn:hover { border-color: var(--faint); }
+.btn.primary { background: var(--brass); color: var(--on-brass); border-color: var(--brass); font-weight: 600; }
+.btn.primary:hover { background: var(--brass-hi); border-color: var(--brass-hi); }
+.btn.ghost { background: transparent; }
+.btn.accent { border-color: rgba(216, 168, 91, .55); color: var(--brass-hi); background: rgba(216, 168, 91, .08); }
+.btn.accent:hover { background: rgba(216, 168, 91, .16); border-color: var(--brass); }
+.btn.square { padding: 6px 8px; }
+.btn .ico { width: 16px; height: 16px; }
+.lbl-s { display: none; }
+
+/* ---------- 로비 ---------- */
+#lobby { overflow-y: auto; padding-block: 28px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: radial-gradient(1100px 520px at 88% -8%, #182033 0%, transparent 62%), radial-gradient(800px 400px at -10% 30%, #121a28 0%, transparent 60%), var(--ink); }
+.lobby-in { max-width: 1120px; margin: 0 auto; display: grid; gap: 36px; }
+.hero { display: grid; gap: 12px; max-width: 760px; }
+.eyebrow { font-size: 12.5px; font-weight: 600; letter-spacing: .03em; color: var(--brass); }
+.hero h2 { font-family: var(--f-display); font-weight: 700; font-size: clamp(28px, 3.6vw, 42px); line-height: 1.22; margin: 0; }
+.hero p { color: var(--muted); margin: 0; font-size: 16px; max-width: 58ch; }
+.hero-cta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.hero-cta .btn { padding: 10px 16px; font-size: 14px; }
+.lobby-note { border: 1px solid var(--ember); background: rgba(228, 106, 78, .08); color: var(--text); border-radius: 8px; padding: 10px 14px; }
+
+.sec { display: grid; gap: 16px; }
+.sec-head { display: flex; align-items: end; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; }
+.sec-head h2 { font-family: var(--f-display); font-size: 26px; font-weight: 700; margin: 0; line-height: 1.25; }
+.sec-head p { margin: 4px 0 0; color: var(--muted); max-width: 62ch; }
+
+.qgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.qcard { position: relative; display: grid; grid-template-rows: auto auto auto 1fr auto; gap: 7px; padding: 12px 16px 14px; border: 1px solid var(--line); border-radius: 14px;
+  background: linear-gradient(180deg, rgba(24, 32, 43, .72), rgba(16, 21, 29, .9)); cursor: pointer; transition: border-color .15s, transform .15s; min-width: 0; }
+.qcard:hover { border-color: rgba(216, 168, 91, .6); transform: translateY(-1px); }
+.qcard:focus-within { border-color: var(--brass); }
+.qart { margin: 0 -6px 2px; border-radius: 10px; background: var(--void); border: 1px solid var(--line-soft); overflow: hidden; }
+.qart svg { display: block; width: 100%; height: auto; }
+.qcard .eyebrow { font-size: 11.5px; }
+.qcard h3 { margin: 0; font-family: var(--f-display); font-size: 20px; line-height: 1.3; font-weight: 700; }
+.qcard p { margin: 0; color: var(--muted); font-size: 13.5px; }
+.qcard .go { justify-self: start; margin-top: 6px; display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 4px 0; color: var(--brass-hi); font-weight: 600; font-size: 14px; }
+.qcard .go::after { content: ""; position: absolute; inset: 0; border-radius: 14px; }
+.qcard .go .ico { width: 16px; height: 16px; transition: transform .15s; }
+.qcard:hover .go .ico { transform: translateX(3px); }
+
+.seedbox { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.seedbox label { font-size: 13px; color: var(--muted); }
+.seedbox input { width: 140px; background: var(--ink-2); border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; font-family: var(--f-mono); }
+.seedbox .why { font-size: 12px; color: var(--muted); }
+
+.stages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; counter-reset: stage; }
+.stage-card { display: grid; grid-template-rows: auto auto auto 1fr auto; gap: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--ink-2); overflow: hidden; min-width: 0; }
+.stage-art { position: relative; aspect-ratio: 16 / 5; background: var(--void); border-bottom: 1px solid var(--line-soft); max-width: 100%; }
+.stage-art canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.stage-art .when { position: absolute; left: 14px; bottom: 10px; font-size: 12px; font-weight: 500; color: var(--brass-hi); background: rgba(5, 7, 11, .72); border: 1px solid var(--line); padding: 2px 8px; border-radius: 999px; }
+.stage-art .chain { position: absolute; right: 12px; top: 10px; font-size: 11.5px; color: var(--muted); background: rgba(5, 7, 11, .72); padding: 2px 8px; border-radius: 999px; }
+.stage-card .sc-head, .stage-card > p, .stage-card .fields, .stage-card .sc-actions { margin: 0 18px; }
+.sc-head { display: grid; gap: 2px; }
+.sc-head .nm { font-family: var(--f-display); font-size: 13px; color: var(--brass); letter-spacing: .04em; }
+.sc-head h3 { margin: 0; font-family: var(--f-display); font-size: 20px; font-weight: 700; line-height: 1.3; }
+.stage-card > p { color: var(--muted); font-size: 13.5px; }
+.fields { display: flex; flex-wrap: wrap; gap: 10px 14px; align-self: end; }
+.fields label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; max-width: 100%; }
+.fields select { background: var(--ink-3); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; color: var(--text); min-width: 0; max-width: 100%; }
+.sc-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-bottom: 18px; }
+
+.how { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 14px; background: rgba(16, 21, 29, .7); }
+.how > div { padding: 16px 18px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.how > div + div { border-left: 1px solid var(--line); }
+.how h3 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
+.how h3 .ico { color: var(--brass); }
+.how p { margin: 0; color: var(--muted); font-size: 13.5px; }
+
+/* ---------- 관측 화면 ---------- */
+#observe { display: grid; grid-template-columns: minmax(0, 1fr) var(--panel-w); }
+.stage { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; background: var(--void); min-height: 0; min-width: 0; }
+.labbar { grid-row: 1; display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; padding: 7px 14px; background: rgba(132, 198, 210, .08); border-bottom: 1px solid rgba(132, 198, 210, .3); font-size: 13px; }
+.labbar .ico { color: var(--cyan); }
+.labbar b { font-weight: 600; color: var(--cyan); }
+.labbar span { color: var(--muted); }
+.labbar .btn { margin-left: auto; }
+.viewport { grid-row: 2; position: relative; overflow: hidden; min-height: 0; container-type: inline-size; }
+.vp-in { position: absolute; inset: 0; }
+#view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: manipulation; }
+#view.aiming { cursor: crosshair; }
+#viewWrap { display: contents; }
+
+/* 지도 위 안내층: 왼쪽 위 해설, 오른쪽 위 보기 전환, 왼쪽 아래 범례, 오른쪽 아래 알림. 가운데는 비워 둡니다.
+   좁은 화면(무대 폭 640px 이하)에서는 해설·보기 전환을 지도 위쪽, 범례를 아래쪽에 따로 두어 지도를 가리지 않습니다. */
+.hud { position: absolute; inset: 0; pointer-events: none; z-index: 1; padding: 10px; display: grid; gap: 8px;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr) minmax(0, max-content); grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: "nar . views" ". . ." "legend . toasts"; }
+.hud-top, .hud-bottom { display: contents; }
+.narrator { grid-area: nar; align-self: start; justify-self: start; }
+.views { grid-area: views; align-self: start; justify-self: end; }
+.legendbox { grid-area: legend; align-self: end; justify-self: start; }
+#toasts { grid-area: toasts; align-self: end; justify-self: end; }
+.glass { background: var(--glass); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgba(0, 0, 0, .35); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+
+.narrator { pointer-events: auto; position: relative; width: 320px; max-width: 100%; padding: 7px 11px 9px; display: grid; gap: 0; }
+.nar-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+/* 시각은 "주 시각"과 "보조 설명"으로 나뉘며, 한 줄에 안 들어가면 보조 설명이 통째로 다음 줄로 갑니다. */
+.nar-time { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; padding-top: 1px; line-height: 1.45; }
+.nar-time b { font-family: var(--f-mono); color: var(--brass-hi); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nar-time span { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.nar-fold { border: 0; background: none; color: var(--muted); padding: 2px; border-radius: 4px; display: grid; place-items: center; }
+.nar-fold .ico { width: 16px; height: 16px; transition: transform .2s; }
+.narrator.folded .nar-fold .ico { transform: rotate(-90deg); }
+.narrator h2 { margin: 0; font-family: var(--f-display); font-size: 18px; line-height: 1.3; font-weight: 700; }
+#narration { margin: 2px 0 0; color: #d4cdbd; font-size: 12.5px; line-height: 1.5; transition: opacity .25s ease; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+#narration.fading { opacity: .2; }
+#narration:empty { display: none; }
+.narrator.folded #narration { display: none; }
+/* 제한 줄 수를 넘는 해설: "더 보기"를 마지막 줄 끝에 겹쳐 놓아, 글이 길어졌다 줄어도 화면이 들썩이지 않습니다. 펼치면 글 아래로 내려옵니다. */
+.narrator.cut #narration, .narrator.open #narration { cursor: pointer; }
+.nar-more { position: absolute; right: 11px; bottom: 9px; border: 0; padding: 0 0 0 24px; font-size: 12.5px; line-height: 1.5; color: var(--brass-hi); background: linear-gradient(90deg, rgba(9, 12, 18, 0), #090c12 18px); }
+.narrator.open #narration { -webkit-line-clamp: unset; max-height: 40vh; overflow-y: auto; }
+.narrator.open .nar-more { position: static; justify-self: end; padding: 2px 0 0; background: none; }
+.narrator.folded .nar-more { display: none; }
+
+.views { pointer-events: auto; display: flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--glass); max-width: 100%; flex-wrap: wrap; }
+.views .vl { font-size: 11.5px; color: var(--muted); padding: 0 8px 0 10px; }
+.views button { border: 0; background: transparent; padding: 6px 11px; font-size: 12.5px; color: var(--muted); }
+.views button:hover { color: var(--text); }
+.views button[aria-pressed="true"] { background: var(--ink-3); color: var(--text); box-shadow: inset 0 -2px 0 var(--brass); }
+
+.legendbox { pointer-events: auto; padding: 6px 10px 8px; max-width: 300px; }
+.lg-head { display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 0; font-size: 12px; color: var(--muted); width: 100%; }
+.lg-head b { color: var(--text); font-weight: 600; }
+.lg-head .ico { width: 14px; height: 14px; margin-left: auto; transition: transform .2s; }
+.legendbox.folded .lg-head .ico { transform: rotate(180deg); }
+.legendbox.folded #mapLegend { display: none; }
+/* 두 칸 범례. 반 칸에 안 들어가는 긴 항목(.wide)은 한 줄을 다 쓰고, 그래도 길면 줄을 바꿉니다 (말줄임 없음). */
+#mapLegend { display: grid; gap: 4px 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 5px; font-size: 12px; }
+.lg-item { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.lg-item.wide { grid-column: 1 / -1; }
+.lg-item i { width: 11px; height: 11px; margin-top: 3px; border-radius: 3px; flex: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12); }
+.lg-item span { min-width: 0; line-height: 1.4; }
+.lg-grad { grid-column: 1 / -1; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; }
+.lg-grad .gl { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; }
+.lg-grad i { grid-column: 1 / -1; height: 8px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); }
+.lg-grad span { font-size: 11px; color: var(--muted); }
+.lg-grad span + span { text-align: right; }
+
+#toasts { pointer-events: none; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; width: 270px; max-width: 100%; }
+.toast { pointer-events: auto; display: flex; gap: 9px; align-items: center; width: 100%; padding: 6px 10px; border-left: 3px solid var(--brass); border-radius: 8px; animation: tin .35s ease-out; transition: opacity .4s, transform .4s; }
+.toast:not(:last-child) { opacity: .78; }
+.toast.out { opacity: 0; transform: translateX(10px); }
+.toast canvas { width: 36px; height: 36px; flex: none; border-radius: 6px; background: rgba(255, 255, 255, .04); }
+.toast .tb { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; min-width: 0; }
+.toast .tk { font-family: var(--f-mono); font-size: 11px; color: var(--brass-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toast .tx { font-size: 12.5px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.toast.disaster { border-left-color: var(--ember); }
+.toast.disaster .tk { color: var(--ember); }
+.toast.god { border-left-color: var(--cyan); }
+.toast.god .tk { color: var(--cyan); }
+.toast.end { border-left-color: var(--ember); }
+@keyframes tin { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+#tooltip { position: absolute; pointer-events: none; background: rgba(10, 13, 19, .95); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; font-size: 12.5px; max-width: 260px; line-height: 1.5; z-index: 3; box-shadow: 0 6px 20px rgba(0, 0, 0, .4); }
+#tooltip b { color: var(--brass-hi); font-weight: 600; }
+#hint { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 4; display: flex; align-items: center; gap: 10px; background: rgba(10, 13, 19, .94); border: 1px dashed var(--brass); color: var(--brass-hi); padding: 7px 8px 7px 14px; border-radius: 999px; font-size: 13px; max-width: calc(100% - 24px); }
+#hint button { border: 1px solid var(--line); background: var(--ink-3); color: var(--text); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+
+/* 재생줄: 재생 · 타임라인 · 속도 */
+.transport { grid-row: 3; position: relative; display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; padding: 8px 12px; background: var(--ink); border-top: 1px solid var(--line); }
+.playbtn { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--brass); background: var(--ink-3); color: var(--brass-hi); display: grid; place-items: center; flex: none; }
+.playbtn:hover { background: #251e12; }
+.timeline { flex: 1 1 260px; min-width: 0; position: relative; }
+#timeline { width: 100%; height: 44px; display: block; }
+#tltip { position: absolute; bottom: calc(100% + 4px); transform: translateX(-50%); background: rgba(10, 13, 19, .96); border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; font-size: 12px; line-height: 1.45; white-space: nowrap; pointer-events: none; z-index: 5; }
+#tltip b { color: var(--brass-hi); font-weight: 600; }
+.speedbox { display: grid; gap: 3px; justify-items: end; flex: none; max-width: 100%; }
+.speeds { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; max-width: 100%; }
+.speeds button { border: 0; background: var(--ink-2); padding: 6px 9px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.speeds button + button { border-left: 1px solid var(--line-soft); }
+.speeds button:hover { color: var(--text); }
+.speeds button[aria-pressed="true"] { background: var(--ink-3); color: var(--text); box-shadow: inset 0 -2px 0 var(--brass); }
+.rate { font-family: var(--f-mono); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* 개입줄 */
+.controls { grid-row: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 9px 12px 11px; background: var(--ink); border-top: 1px solid var(--line-soft); }
+.ctl-power { display: grid; gap: 4px; flex: none; }
+.ctl-power .label { font-size: 12px; color: var(--text); font-weight: 500; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.ctl-power .label small { color: var(--muted); font-weight: 400; font-size: 11.5px; }
+.powerrow { display: flex; align-items: center; gap: 8px; }
+.pips { display: flex; gap: 3px; }
+.pip { width: 11px; height: 11px; border-radius: 3px; border: 1px solid var(--brass); opacity: .35; }
+.pip.on { background: var(--brass); opacity: 1; box-shadow: 0 0 6px rgba(216, 168, 91, .55); }
+.pip.part { background: linear-gradient(90deg, var(--brass) var(--p), transparent var(--p)); opacity: .75; }
+.pnum { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.acts { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 320px; min-width: 0; }
+.act { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--ink-2); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.act .ico { color: var(--brass-hi); }
+.act .cost { display: inline-flex; gap: 2px; }
+.act .cost i { width: 5px; height: 5px; border-radius: 50%; background: var(--brass); }
+.act:hover:not([aria-disabled="true"]) { border-color: var(--brass); }
+.act[aria-pressed="true"] { border-color: var(--brass-hi); background: #2a2214; color: var(--brass-hi); }
+.act[aria-disabled="true"] { opacity: .42; cursor: not-allowed; }
+.nextbtn { margin-left: auto; border: 1px solid var(--leaf); color: var(--leaf); background: rgba(150, 207, 136, .08); border-radius: 8px; padding: 8px 13px; display: inline-flex; gap: 6px; align-items: center; font-weight: 600; font-size: 13px; }
+.nextbtn:hover { background: rgba(150, 207, 136, .16); }
+#acttip { position: fixed; z-index: 50; width: min(300px, calc(100vw - 24px)); padding: 10px 12px; pointer-events: none; font-size: 13px; line-height: 1.5; display: grid; gap: 4px; }
+#acttip .h { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
+#acttip .h span { font-family: var(--f-mono); font-size: 11.5px; color: var(--brass-hi); font-weight: 400; }
+#acttip p { margin: 0; color: #cfc8b8; }
+#acttip .ahow { display: block; font-size: 12px; color: var(--cyan); }
+#acttip .why { font-size: 12px; color: var(--ember); }
+
+#endcard { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -52%); width: min(calc(100% - 24px), 460px); max-height: calc(100% - 24px); overflow-y: auto; padding: 20px 22px; display: grid; gap: 10px; z-index: 5; box-shadow: 0 20px 60px rgba(0, 0, 0, .6); }
+#endcard .kicker { color: var(--ember); font-size: 12.5px; font-weight: 600; }
+#endcard h3 { margin: 0; font-family: var(--f-display); font-size: 24px; line-height: 1.3; }
+#endcard p { margin: 0; color: var(--muted); }
+#endcard .oc { display: grid; gap: 2px; padding: 9px 12px; border-radius: 8px; background: rgba(255, 255, 255, .03); border-left: 3px solid var(--c, var(--brass)); }
+#endcard .oc small { font-size: 11.5px; color: var(--muted); }
+#endcard .oc b { font-size: 15px; }
+#endcard .oc span { font-size: 12.5px; color: var(--muted); }
+#endcard .row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+@container (max-width: 640px) {
+  .vp-in { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .hud, .hud-top, .hud-bottom { display: contents; }
+  .narrator { grid-area: auto; grid-row: 1; grid-column: 1; width: auto; margin: 8px 8px 0; z-index: 1; }
+  #narration { -webkit-line-clamp: 3; }
+  .views { grid-area: auto; grid-row: 2; grid-column: 1; justify-self: start; align-self: start; margin: 6px 8px 0; z-index: 1; }
+  .views .vl { padding-left: 8px; }
+  #view { position: relative; inset: auto; grid-row: 3; grid-column: 1; min-height: 0; }
+  #toasts { grid-area: auto; grid-row: 3; grid-column: 1; align-self: end; justify-self: stretch; width: auto; margin: 0 8px 6px; z-index: 2; }
+  #toasts .toast:not(:last-child) { display: none; }
+  #toasts .toast { background: rgba(12, 15, 22, .96); }
+  .legendbox { grid-area: auto; grid-row: 4; grid-column: 1; justify-self: start; margin: 0 8px 8px; z-index: 1; max-width: calc(100% - 16px); }
+  /* 개입 위치 고르기 안내: 범례·알림과 겹치지 않게 지도 맨 위에 띄웁니다. 취소 버튼 말고는 눌러도 그 아래 지도로 전해집니다. */
+  #hint { grid-row: 3; grid-column: 1; top: 6px; bottom: auto; left: 8px; right: 8px; width: fit-content; margin-inline: auto; transform: none; pointer-events: none; }
+  #hint button { pointer-events: auto; }
+  .glass { box-shadow: none; }
+}
+
+/* ---------- 기록 패널 ---------- */
+.panel { border-left: 1px solid var(--line); background: var(--ink-2); overflow-y: auto; min-height: 0; display: flex; flex-direction: column; }
+.psec { padding: 12px 16px 14px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+.psec h3 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .06em; color: var(--muted); display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.psec h3 small { font-weight: 400; letter-spacing: 0; font-size: 11px; color: var(--faint); }
+.sec-toggle { display: flex; align-items: baseline; gap: 8px; width: 100%; border: 0; background: none; padding: 0; color: inherit; font: inherit; letter-spacing: inherit; text-align: left; }
+.sec-toggle:hover, .sec-toggle:hover small { color: var(--text); }
+.sec-toggle small { margin-left: auto; }
+.sec-toggle .ico { width: 14px; height: 14px; align-self: center; transition: transform .2s; }
+.sec-toggle.folded .ico { transform: rotate(-90deg); }
+.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 0; }
+.stat { padding: 7px 10px 8px; border-radius: 8px; background: rgba(255, 255, 255, .025); border: 1px solid var(--line-soft); min-width: 0; }
+.stat dt { font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 4px; min-width: 0; }
+.stat dt span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trend { margin-left: auto; font-size: 10px; line-height: 1; flex: none; color: #b9b2a3; }
+.stat dd { margin: 1px 0 0; font-family: var(--f-mono); font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat dd.warn { color: var(--ember); }
+.stat dd.good { color: var(--leaf); }
+.stat.text dd { font-family: var(--f-body); font-size: 14px; }
+#sparks { display: grid; gap: 4px; }
+.spark { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 10px; align-items: center; min-height: 36px; }
+.spark .sl { display: grid; min-width: 0; }
+.spark .sl span { font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spark .sl span::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; }
+.spark .sl b { font-family: var(--f-mono); font-weight: 500; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spark canvas { width: 100%; height: 34px; display: block; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--ink-2); z-index: 1; }
+.tabs button { flex: 1; border: 0; background: transparent; padding: 10px 6px; font-size: 13px; color: var(--muted); border-bottom: 2px solid transparent; }
+.tabs button:hover { color: var(--text); }
+.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--brass); font-weight: 500; }
+.tabpane { padding: 10px 16px 20px; flex: 1; }
+.logfilter { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.logfilter button { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+.logfilter button[aria-pressed="true"] { background: var(--ink-3); color: var(--text); border-color: var(--faint); }
+#log { list-style: none; margin: 0; padding: 0; display: grid; }
+#log li { padding: 8px 0 8px 16px; border-bottom: 1px solid var(--line-soft); font-size: 13px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 10px; position: relative; }
+#log li::before { content: ""; position: absolute; left: 2px; top: 14px; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+#log li .t { font-family: var(--f-mono); font-size: 11px; color: var(--muted); grid-column: 1; }
+#log li .x { grid-column: 1; }
+#log li canvas { grid-column: 2; grid-row: 1 / span 2; width: 34px; height: 34px; border-radius: 6px; background: rgba(255, 255, 255, .04); }
+#log li.milestone::before { background: var(--brass-hi); }
+#log li.milestone .x { color: var(--brass-hi); }
+#log li.god::before { background: var(--cyan); }
+#log li.god .x { color: var(--cyan); }
+#log li.disaster::before { background: var(--ember); }
+#log li.disaster .x { color: #f08f78; }
+#log li.end::before { background: var(--ember); }
+#log li.end .x { color: var(--ember); font-weight: 600; }
+#log[data-filter="milestone"] li:not(.milestone):not(.end),
+#log[data-filter="disaster"] li:not(.disaster):not(.end),
+#log[data-filter="god"] li:not(.god) { display: none; }
+.empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+#tl { width: 100%; height: 124px; display: block; margin-bottom: 8px; }
+.cmp-note { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
+table.cmp { width: 100%; border-collapse: collapse; font-size: 12.5px; word-break: keep-all; overflow-wrap: break-word; }
+table.cmp th { text-align: left; font-weight: 500; color: var(--muted); font-size: 11px; padding: 4px; border-bottom: 1px solid var(--line); }
+table.cmp td { padding: 6px 4px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+table.cmp td.n { font-family: var(--f-mono); color: var(--muted); width: 18px; }
+/* 좁은 패널에 네 칸이 다 들어가도록 시각은 본문 글꼴로 쓰고, " · "로 나뉜 조각 단위로 줄을 바꿉니다. */
+table.cmp td.v { font-size: 11.5px; font-variant-numeric: tabular-nums; }
+table.cmp td.v span { display: inline-block; }
+table.cmp td.v.hit span { white-space: nowrap; }
+table.cmp td.v.hit { color: var(--brass-hi); }
+table.cmp td.v.miss { color: var(--faint); }
+.tablewrap { overflow-x: auto; }
+.note { color: var(--muted); font-size: 12px; max-width: 75ch; }
+.extra-list { display: grid; gap: 8px; }
+.sp { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 8px; align-items: start; font-size: 12.5px; padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
+.sp .sw { width: 12px; height: 12px; border-radius: 3px; margin-top: 3px; }
+.sp .nm { font-weight: 500; }
+.sp .tr { color: var(--muted); font-size: 11.5px; }
+.sp .bm { font-family: var(--f-mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+#phylo { width: 100%; height: 300px; display: block; }
+
+/* ---------- 첫 방문 안내 ---------- */
+#guide { position: fixed; inset: 0; z-index: 40; }
+#guide .spot { position: absolute; border-radius: 12px; box-shadow: 0 0 0 200vmax rgba(3, 4, 7, .66); outline: 2px solid var(--brass); outline-offset: 2px; transition: left .3s, top .3s, width .3s, height .3s; pointer-events: none; }
+#guide .gcard { position: absolute; width: min(380px, calc(100vw - 32px)); padding: 16px 18px; display: grid; gap: 8px; background: var(--ink-2); border-color: rgba(216, 168, 91, .5); }
+#guide .gstep { font-size: 12.5px; font-weight: 600; color: var(--brass); }
+#guide h3 { margin: 0; font-family: var(--f-display); font-size: 21px; line-height: 1.3; }
+#guide p { margin: 0; color: #cfc8b8; }
+#guide .gfoot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+#guide .gfoot label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); margin-right: auto; }
+#guide .dots { display: flex; gap: 5px; }
+#guide .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
+#guide .dots i.on { background: var(--brass); }
+
+@media (max-width: 1100px) {
+  :root { --panel-w: 330px; }
+  .qgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .speeds button { padding: 6px 7px; }
+}
+@media (max-width: 900px) {
+  body { overflow: auto; }
+  #app { height: auto; min-height: 100%; }
+  #lobby { overflow: visible; }
+  #lab { overflow: visible; }
+  #observe { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; }
+  .stage { height: min(86vh, 760px); min-height: 520px; }
+  .panel { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .tabs { position: static; }
+  .stages { grid-template-columns: minmax(0, 1fr); }
+  .how { grid-template-columns: minmax(0, 1fr); }
+  .how > div + div { border-left: 0; border-top: 1px solid var(--line); }
+  .nextbtn { margin-left: 0; }
+  .speedbox { justify-items: start; }
+}
+.views [data-zoom] { display: none; }
+@media (max-width: 640px) {
+  .qgrid { grid-template-columns: minmax(0, 1fr); }
+  /* 휴대폰 관측 화면: 머리줄을 줄이고, 해설 → 지도(그림 크기만큼) → 범례 → 재생줄 → 개입줄을 빈틈없이 쌓아 첫 화면에 들어오게 합니다.
+     재생줄은 화면 아래에 걸려 있어 언제나 손이 닿습니다. 캔버스 크기는 app.js의 fitPhone()이 정합니다. */
+  #app[data-screen="observe"] .brand { display: none; }
+  #app[data-screen="observe"] .top { padding-block: 7px; }
+  .crumbs { flex: 1 1 100%; gap: 5px 10px; }
+  .where { flex: 1 1 100%; }
+  .crumb-actions { flex: 1 1 100%; gap: 5px; flex-wrap: nowrap; }
+  .crumb-actions .btn { flex: 1 1 auto; padding: 5px 7px; font-size: 12.5px; gap: 4px; }
+  .crumb-actions .btn.square { flex: none; }
+  .crumb-actions .lbl { display: none; }
+  .crumb-actions .lbl-s { display: inline; }
+  .stage { display: block; height: auto; min-height: 0; }
+  .viewport { height: auto; min-height: 0; }
+  .vp-in { position: relative; inset: auto; grid-template-rows: auto auto auto auto; }
+  #viewWrap { display: block; grid-row: 3; grid-column: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; margin-top: calc(var(--view-under, 0px) * -1); scrollbar-width: none; }
+  #viewWrap::-webkit-scrollbar { display: none; }
+  #view { width: var(--view-w, 100%); height: var(--view-h, 60vw); }
+  .views [data-zoom] { display: block; border-left: 1px solid var(--line-soft); color: var(--brass-hi); }
+  #narration { min-height: 4.5em; }
+  #toasts { grid-row: 3 / 5; }
+  .transport { position: sticky; bottom: 0; z-index: 3; gap: 6px 10px; padding: 6px 12px; }
+  #endcard { top: 8px; transform: translateX(-50%); max-height: calc(100% - 16px); padding: 14px 16px; }
+}
+@media (max-width: 560px) {
+  #lobby { padding-block: 24px 40px; }
+  .lobby-in { gap: 34px; }
+  .hero p { font-size: 15px; }
+  .qcard h3 { font-size: 20px; }
+  .narrator h2 { font-size: 17px; }
+  #narration { font-size: 12.5px; }
+  .timeline { flex-basis: 100%; order: 3; }
+  .speeds button { padding: 6px 8px; font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast, #narration, #guide .spot, .qcard { animation: none; transition: none; }
+}
+</style>
+
+<div id="app" data-screen="lobby">
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div><h1>창세 관측소</h1><p>개입은 가끔, 관찰은 오래</p></div>
+    </div>
+    <div class="crumbs" id="crumbs" hidden>
+      <div class="where"><b id="modeTag"></b><span class="seed" id="seedTag"></span></div>
+      <div class="crumb-actions">
+        <button class="btn" id="btnRestart" type="button" title="같은 씨앗으로 처음부터 다시 봅니다"></button>
+        <button class="btn" id="btnNew" type="button" title="씨앗을 바꿔 다른 우연의 세계를 봅니다"></button>
+        <button class="btn accent" id="btnLabHere" type="button" title="이 조건으로 세계를 여러 번 돌려 비교합니다"></button>
+        <button class="btn square" id="btnHelp" type="button" aria-label="화면 안내 다시 보기" title="화면 안내 다시 보기"></button>
+        <button class="btn ghost" id="btnLobby" type="button"></button>
+      </div>
+    </div>
+  </header>
+
+  <section id="lobby" aria-label="관측소 로비">
+    <div class="lobby-in">
+      <div class="lobby-note" id="lobbyNote" role="status" hidden></div>
+      <div class="hero">
+        <span class="eyebrow">세계를 다시 돌려 보는 실험실</span>
+        <h2>세상을 그냥 두면, 역사는 다시 같은 길을 갈까?</h2>
+        <p>당신은 이 세계의 관찰자입니다. 대부분은 지켜보고, 가끔 번개나 운석 같은 간접적인 방법으로만 슬쩍 건드릴 수 있습니다.</p>
+        <div class="hero-cta">
+          <button class="btn primary" type="button" id="heroLab">지금부터의 미래 실험하기</button>
+          <button class="btn" type="button" id="heroWatch">2026년 지구 직접 지켜보기</button>
+        </div>
+      </div>
+
+      <section class="sec" aria-labelledby="qTitle">
+        <div class="sec-head">
+          <div>
+            <h2 id="qTitle">무엇이 궁금한가요?</h2>
+            <p>질문을 고르면 실험실이 세계를 여러 번 돌려 답을 찾아 줍니다. 결론은 쉬운 말로 먼저, 그래프는 그다음에 보여 줍니다.</p>
+          </div>
+        </div>
+        <div class="qgrid">
+          <article class="qcard" data-q="1">
+            <div class="qart" aria-hidden="true"></div>
+            <span class="eyebrow">질문 1 · 미래</span>
+            <h3>지금부터 인류의 미래는?</h3>
+            <p>2026년의 지구에서 출발한 세계를 수십 번 돌려, 어떤 미래가 얼마나 자주 나오는지 보여 줍니다.</p>
+            <button class="go" type="button">실험 설계하기</button>
+          </article>
+          <article class="qcard" data-q="2">
+            <div class="qart" aria-hidden="true"></div>
+            <span class="eyebrow">질문 2 · 수렴</span>
+            <h3>다시 돌려도 같은 역사가 될까?</h3>
+            <p>같은 출발점에서 우연(씨앗)만 바꿔 여러 번 돌리고, 세계들이 비슷한 곳으로 모이는지 점점 흩어지는지 잽니다.</p>
+            <button class="go" type="button">실험 설계하기</button>
+          </article>
+          <article class="qcard" data-q="3">
+            <div class="qart" aria-hidden="true"></div>
+            <span class="eyebrow">질문 3 · 개입</span>
+            <h3>개입해도 미래는 같은 곳으로 갈까?</h3>
+            <p>완전히 똑같은 쌍둥이 세계 중 한쪽에만 개입한 뒤, 그 차이가 사라지는지 끝까지 남는지 비교합니다.</p>
+            <button class="go" type="button">실험 설계하기</button>
+          </article>
+          <article class="qcard" data-q="4">
+            <div class="qart" aria-hidden="true"></div>
+            <span class="eyebrow">질문 4 · 조건</span>
+            <h3>조건이 다르면 무엇이 달라질까?</h3>
+            <p>협력·기후·질병 같은 출발 조건을 바꾼 두 무리의 세계를 나란히 돌려, 결말이 어떻게 달라지는지 봅니다.</p>
+            <button class="go" type="button">실험 설계하기</button>
+          </article>
+        </div>
+      </section>
+
+      <section class="sec" aria-labelledby="sTitle">
+        <div class="sec-head">
+          <div>
+            <h2 id="sTitle">직접 지켜보기</h2>
+            <p>한 세계를 골라 처음부터 지켜보세요. 앞 단계의 결과를 이어받아 우주 → 항성계 → 생명 → 문명으로 내려갈 수도 있습니다.</p>
+          </div>
+          <div class="seedbox">
+            <label for="seedInput">세계 씨앗</label>
+            <input id="seedInput" inputmode="numeric" autocomplete="off" aria-describedby="seedWhy">
+            <button class="btn square" id="seedRoll" type="button" aria-label="새 씨앗 뽑기" title="새 씨앗 뽑기"></button>
+            <span class="why" id="seedWhy">같은 씨앗이면 같은 역사가 나옵니다</span>
+          </div>
+        </div>
+        <div class="stages" id="stages"></div>
+      </section>
+
+      <section class="sec" aria-labelledby="hTitle">
+        <div class="sec-head"><h2 id="hTitle">어떻게 작동하나요?</h2></div>
+        <div class="how">
+          <div>
+            <h3 id="howSeed">씨앗은 우연의 흐름입니다</h3>
+            <p>세계의 모든 우연은 씨앗 번호 하나에서 나옵니다. 같은 씨앗이면 같은 역사가, 다른 씨앗이면 다른 역사가 펼쳐집니다.</p>
+          </div>
+          <div>
+            <h3 id="howAct">개입은 간접적으로만</h3>
+            <p>무언가를 직접 만들 수는 없습니다. 번개나 가뭄처럼 그 세계에서 일어날 법한 사건만 일으킬 수 있고, 그 뜻은 세계가 정합니다.</p>
+          </div>
+          <div>
+            <h3 id="howModel">모든 결과는 모형의 결과</h3>
+            <p>현실을 크게 단순화한 규칙으로 계산합니다. 예언이 아니라, 이런 규칙이라면 이런 일이 생길 수 있다는 것을 보여 주는 실험입니다.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <section id="observe" hidden aria-label="관측 화면">
+    <div class="stage" id="stage">
+      <div class="labbar" id="labBar" hidden></div>
+      <div class="viewport" id="viewport">
+       <div class="vp-in" id="vpIn">
+        <div id="viewWrap"><canvas id="view" aria-label="세계 관측 화면. 지도를 가리키거나 누르면 자세한 정보가 보입니다."></canvas></div>
+        <div class="hud">
+          <div class="hud-top">
+            <div class="narrator glass" id="narrator">
+              <div class="nar-top">
+                <span class="nar-time" id="eraTime"></span>
+                <button class="nar-fold" id="narFold" type="button" aria-label="해설 접기" aria-expanded="true"></button>
+              </div>
+              <h2 id="eraName"></h2>
+              <p id="narration" aria-live="polite"></p>
+              <button class="nar-more" id="narMore" type="button" hidden aria-expanded="false" aria-controls="narration">더 보기</button>
+            </div>
+            <div class="views" id="views" role="group" aria-label="지도 보기 방식"></div>
+          </div>
+          <div class="hud-bottom">
+            <div class="legendbox glass" id="legendBox" hidden>
+              <button class="lg-head" id="legendToggle" type="button" aria-expanded="true" aria-controls="mapLegend"><b>범례</b><span id="legendView"></span></button>
+              <div id="mapLegend"></div>
+            </div>
+            <div id="toasts" aria-live="polite"></div>
+          </div>
+        </div>
+        <div id="tooltip" hidden></div>
+        <div id="hint" hidden></div>
+        <div id="endcard" class="glass" hidden role="dialog" aria-labelledby="endTitle"></div>
+       </div>
+      </div>
+      <div class="transport" id="transport">
+        <button class="playbtn" id="btnPlay" type="button" aria-label="일시정지"></button>
+        <div class="timeline">
+          <canvas id="timeline" aria-label="관측 기간과 지금까지 일어난 큰 사건"></canvas>
+          <div id="tltip" hidden></div>
+        </div>
+        <div class="speedbox">
+          <div class="speeds" id="speeds" role="group" aria-label="시간 속도"></div>
+          <span class="rate" id="rate"></span>
+        </div>
+      </div>
+      <div class="controls" id="controls">
+        <div class="ctl-power">
+          <span class="label">개입력 <small>(시간이 흐르면 차오릅니다)</small></span>
+          <div class="powerrow"><div class="pips" id="pips"></div><span class="pnum" id="pnum"></span></div>
+        </div>
+        <div class="acts" id="acts" role="group" aria-label="개입"></div>
+        <button class="nextbtn" id="btnNext" type="button" hidden></button>
+      </div>
+    </div>
+    <aside class="panel" id="panel" aria-label="관측 기록">
+      <section class="psec">
+        <h3>지금 이 세계 <small>화살표는 최근 변화</small></h3>
+        <dl class="stats" id="stats"></dl>
+      </section>
+      <section class="psec" id="sparkSec">
+        <h3><button class="sec-toggle" id="sparkToggle" type="button" aria-expanded="true" aria-controls="sparks"><span>변화 추이</span><small id="sparkNote">관측 시작부터 지금까지</small></button></h3>
+        <div id="sparks"></div>
+      </section>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="log" aria-selected="true">연대기</button>
+        <button type="button" role="tab" data-tab="compare" aria-selected="false">우리 역사와 비교</button>
+        <button type="button" role="tab" data-tab="extra" aria-selected="false" id="extraTabBtn" hidden></button>
+      </div>
+      <div class="tabpane" id="tab-log" role="tabpanel">
+        <div class="logfilter" id="logFilter" role="group" aria-label="연대기 거르기">
+          <button type="button" data-f="all" aria-pressed="true">전체</button>
+          <button type="button" data-f="milestone" aria-pressed="false">이정표</button>
+          <button type="button" data-f="disaster" aria-pressed="false">재난</button>
+          <button type="button" data-f="god" aria-pressed="false">나의 개입</button>
+        </div>
+        <ol id="log" data-filter="all"></ol>
+        <p class="empty" id="logEmpty">아직 기록된 일이 없습니다. 시간이 흐르면 큰 사건이 여기에 쌓입니다.</p>
+      </div>
+      <div class="tabpane" id="tab-compare" role="tabpanel" hidden>
+        <p class="cmp-note">위 줄은 실제 역사, 아래 줄은 이번 세계입니다. 같은 번호끼리 이은 선이 기울수록 시기가 달랐다는 뜻입니다.</p>
+        <canvas id="tl"></canvas>
+        <div class="tablewrap"><table class="cmp" id="cmp"></table></div>
+      </div>
+      <div class="tabpane" id="tab-extra" role="tabpanel" hidden></div>
+    </aside>
+    <div id="guide" hidden role="dialog" aria-modal="true" aria-labelledby="guideTitle">
+      <div class="spot" id="guideSpot"></div>
+      <div class="gcard glass" id="guideCard">
+        <span class="gstep" id="guideStep"></span>
+        <h3 id="guideTitle"></h3>
+        <p id="guideText"></p>
+        <div class="gfoot">
+          <label for="guideNever"><input type="checkbox" id="guideNever">다시 보지 않기</label>
+          <div class="dots" id="guideDots"></div>
+          <button class="btn ghost" type="button" id="guidePrev">이전</button>
+          <button class="btn primary" type="button" id="guideNext">다음</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="lab" hidden aria-label="실험실"></section>
+  <div id="acttip" class="glass" hidden role="tooltip"></div>
+</div>
+
+<script src="js/core.js"></script>
+<script src="js/creature.js"></script>
+<script src="js/earth.js"></script>
+<script src="js/universe.js"></script>
+<script src="js/stellar.js"></script>
+<script src="js/life.js"></script>
+<script src="js/civ.js"></script>
+<script src="js/labcore.js"></script>
+<script src="js/app.js"></script>
+<script src="js/lab.js"></script>
+
+</html>

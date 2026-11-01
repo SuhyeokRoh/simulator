@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>생물 생김새 도감</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+:root {
+  --void: #05070b; --ink: #0b0e14; --ink-2: #11161f; --ink-3: #19202c; --line: #252e3e;
+  --text: #ebe4d3; --muted: #929aab; --faint: #5d6678; --brass: #d8a85b; --brass-hi: #f1cb86;
+  --cyan: #84c6d2; --ember: #e46a4e; --leaf: #96cf88;
+  --f-display: 'Gowun Batang', 'Nanum Myeongjo', 'Batang', serif;
+  --f-body: 'IBM Plex Sans KR', 'Malgun Gothic', 'Apple SD Gothic Neo', system-ui, sans-serif;
+  --f-mono: 'IBM Plex Mono', ui-monospace, 'Consolas', monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--ink); color: var(--text); font-family: var(--f-body); font-size: 14px; line-height: 1.55; }
+button, select, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+header { padding: 28px 24px 8px; max-width: 1280px; margin: 0 auto; }
+h1 { font-family: var(--f-display); font-size: 28px; margin: 0 0 6px; letter-spacing: .02em; }
+h2 { font-family: var(--f-display); font-size: 20px; margin: 0 0 4px; }
+.lead { color: var(--muted); margin: 0; max-width: 760px; }
+main { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
+.bar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 12px 24px; margin: 12px auto 20px; max-width: 1280px;
+  background: rgba(11,14,20,.92); backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); }
+.bar label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.bar input[type=number] { width: 96px; }
+.bar input, .bar select { background: var(--ink-3); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--ink-3); border-radius: 6px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+.btn:hover { border-color: var(--faint); }
+.btn.primary { background: var(--brass); color: #1a1408; border-color: var(--brass); font-weight: 600; }
+section { margin: 0 0 36px; }
+.sec-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin-bottom: 12px; }
+.sec-head p { margin: 0; color: var(--muted); font-size: 13px; }
+.plan { border: 1px solid var(--line); border-radius: 10px; background: var(--ink-2); margin-bottom: 14px; overflow: hidden; }
+.plan-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.plan-head b { font-size: 15px; }
+.plan-head code { font-family: var(--f-mono); color: var(--faint); font-size: 12px; }
+.plan-head span { color: var(--muted); font-size: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--cell-want, 180px), 1fr)); gap: 8px; padding: 10px; }
+.card { background: var(--ink-3); border-radius: 8px; padding: 10px 10px 12px; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+.card canvas { display: block; max-width: 100%; height: auto !important; background: radial-gradient(circle at 50% 42%, #1a2231 0%, #0f141d 70%); border-radius: 8px; }
+.card .form { font-size: 12px; color: var(--brass-hi); font-weight: 600; }
+.card .desc { font-size: 12px; color: var(--muted); text-align: center; line-height: 1.45; word-break: keep-all; }
+.lineage { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--ink-2); }
+.lineage .card { flex: none; width: 132px; padding: 4px; border-radius: 8px; background: var(--ink-2); }
+.lineage .gen { font-family: var(--f-mono); font-size: 11px; color: var(--faint); }
+.sprites { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.sprite { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; color: var(--muted); }
+.sprite canvas { flex: none; border-radius: 4px; }
+.perf { font-family: var(--f-mono); font-size: 12px; color: var(--muted); white-space: pre-wrap; background: var(--ink-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-top: 10px; min-height: 40px; }
+.note { color: var(--faint); font-size: 12px; margin-top: 6px; }
+@media (max-width: 640px) {
+  header { padding: 20px 16px 4px; }
+  main { padding-left: 16px; padding-right: 16px; }
+  h1 { font-size: 24px; }
+  /* 좁은 화면: 설정 막대는 따라오지 않고(화면을 가리지 않게) 촘촘하게, 카드는 두 줄 */
+  .bar { position: static; padding: 10px 16px; gap: 8px 10px; margin: 8px auto 14px; backdrop-filter: none; }
+  .bar label { font-size: 12px; }
+  .bar input[type=number] { width: 72px; }
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 6px; }
+  .card { padding: 6px 6px 8px; }
+  .lineage { gap: 6px; padding: 8px; }
+  .lineage .card { width: calc(33.333% - 4px); }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>생물 생김새 도감</h1>
+  <p class="lead">생명 단계의 생물은 숫자 32개짜리 유전체로 생김새가 정해집니다. 진화하며 유전자가 조금씩 바뀌면 자식은 부모를 닮고,
+    여러 세대가 지나면 눈에 띄게 달라집니다. 이 페이지는 몸 설계마다 무작위 유전체로 그린 예시와 한 혈통의 세대 변화를 보여 주는 개발용 미리보기입니다.</p>
+</header>
+<div class="bar" role="toolbar" aria-label="보기 설정">
+  <label>씨앗 <input id="seed" type="number" min="1" value="7" aria-label="씨앗 번호"></label>
+  <button class="btn primary" id="reroll" type="button">새로 뽑기</button>
+  <label>그림 크기
+    <select id="size" aria-label="그림 크기"><option value="96">작게 (96px)</option><option value="128" selected>보통 (128px)</option><option value="160">크게 (160px)</option></select>
+  </label>
+  <label>몸 설계 <select id="filter" aria-label="몸 설계 고르기"><option value="">모두 보기</option></select></label>
+  <label><input id="anim" type="checkbox"> 살랑살랑 움직이기</label>
+  <label><input id="outline" type="checkbox" checked> 윤곽선</label>
+</div>
+<main>
+  <section id="plans">
+    <div class="sec-head"><h2>몸 설계별 모습</h2><p>같은 설계 안에서도 유전자에 따라 갈래(형태)·색·무늬·부속지가 달라집니다.</p></div>
+    <div id="planList"></div>
+  </section>
+  <section id="line">
+    <div class="sec-head"><h2>한 혈통의 12세대</h2><p>한 유전체를 12번 연달아 변이시킨 모습입니다. 이웃한 세대는 닮고, 끝과 끝은 확실히 다릅니다.</p></div>
+    <div class="bar" style="position:static;margin:0 0 10px;padding:0;border:0;background:none">
+      <label>몸 설계 <select id="linePlan" aria-label="혈통의 몸 설계"></select></label>
+      <label>변이 <select id="lineAmt" aria-label="변이 크기"><option value="1">보통 변이</option><option value="2">큰 혁신 (amount 2)</option></select></label>
+      <button class="btn" id="lineNew" type="button">다른 혈통</button>
+    </div>
+    <div class="lineage" id="lineage"></div>
+  </section>
+  <section id="tiny">
+    <div class="sec-head"><h2>지도 크기에서 알아보기</h2><p>지도에 찍히는 24px·32px 크기 (지형 위에 올렸을 때)</p></div>
+    <div class="sprites" id="sprites"></div>
+  </section>
+  <section id="speed">
+    <div class="sec-head"><h2>그리기 속도</h2><p>32px 그림 한 장을 직접 그리는 시간과, 초상화 캐시에서 꺼내 찍는 시간</p></div>
+    <button class="btn" id="perfBtn" type="button">속도 재기</button>
+    <div class="perf" id="perf" aria-live="polite">버튼을 누르면 측정합니다.</div>
+  </section>
+</main>
+<script src="../js/core.js"></script>
+<script src="../js/creature.js"></script>
+<script>
+'use strict';
+(function () {
+  const C = WS.Creature, $ = (id) => document.getElementById(id);
+  const PLAN_KEYS = Object.keys(C.PLANS);
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  const live = [], lineLive = []; // 움직일 캔버스: { cv, g, tr, size } (설계별 카드 / 혈통 카드를 따로 — 다시 그릴 때 각자 비운다)
+  const narrow = window.matchMedia ? window.matchMedia('(max-width: 640px)') : { matches: false };
+  const allLive = () => live.concat(lineLive);
+  const traitsFor = (k, r) => {
+    const t = Object.assign({}, C.PLANS[k].traits);
+    if (k === 'grazer' || k === 'hunter' || k === 'plant' || k === 'sapient') t.size = 0.15 + r.next() * 0.7;
+    if (k === 'hunter' || k === 'grazer') t.intel = r.next() * 0.6;
+    if (k === 'sapient') { t.intel = 0.85 + r.next() * 0.15; t.manip = 0.5 + r.next() * 0.5; t.social = 0.4 + r.next() * 0.6; }
+    return t;
+  };
+  function makeCanvas(size, bg) {
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(size * dpr); cv.height = Math.round(size * dpr);
+    cv.style.width = size + 'px'; cv.style.height = size + 'px';
+    if (bg) cv.style.background = bg;
+    return cv;
+  }
+  function paint(o, t) {
+    const x = o.cv.getContext('2d');
+    x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    x.clearRect(0, 0, o.size, o.size);
+    C.draw(x, o.g, o.tr, o.size / 2, o.size / 2, o.size, { t: t || 0, outline: $('outline').checked });
+  }
+  function card(g, tr, size, top, bottom, list) {
+    const el = document.createElement('div');
+    el.className = 'card';
+    const cv = makeCanvas(size);
+    cv.setAttribute('role', 'img');
+    const d = C.describe(g, tr);
+    cv.setAttribute('aria-label', d);
+    const o = { cv, g, tr, size };
+    paint(o);
+    (list || live).push(o);
+    if (top) { const f = document.createElement('div'); f.className = top.cls; f.textContent = top.text; el.appendChild(f); }
+    el.appendChild(cv);
+    const p = document.createElement('div'); p.className = 'desc'; p.textContent = bottom == null ? d : bottom; el.appendChild(p);
+    return el;
+  }
+  function renderPlans() {
+    live.length = 0;
+    const seed = +$('seed').value || 1, size = +$('size').value, filter = $('filter').value, list = $('planList');
+    list.innerHTML = '';
+    for (const k of PLAN_KEYS) {
+      if (filter && filter !== k) continue;
+      const P = C.PLANS[k], box = document.createElement('div');
+      box.className = 'plan';
+      box.innerHTML = `<div class="plan-head"><b>${P.label}</b><code>${k}</code><span>갈래: ${P.forms.join(' · ')}</span></div>`;
+      const grid = document.createElement('div');
+      grid.className = 'grid';
+      grid.style.setProperty('--cell-want', (size + 40) + 'px');
+      // 좁은 화면에서는 카드 수를 줄인다 (갈래마다 한 장, 두 줄 격자에 맞게 짝수)
+      const n = narrow.matches ? (filter ? 8 : Math.max(2, P.forms.length + (P.forms.length % 2))) : filter ? 12 : Math.max(6, P.forms.length * 2);
+      const r = new WS.RNG(seed * 1009 + k.length * 7919 + k.charCodeAt(0));
+      for (let i = 0; i < n; i++) {
+        const g = C.genome(r);
+        g.form = i % 12;
+        const tr = traitsFor(k, r);
+        // 갈래 이름은 그림과 같은 규칙(C.subform: 유전자 원형 + 특성)으로 고른다
+        grid.appendChild(card(g, tr, size, { cls: 'form', text: P.forms[C.subform ? C.subform(g, tr) : g.form % P.forms.length] }));
+      }
+      box.appendChild(grid);
+      list.appendChild(box);
+    }
+    renderLineage();
+  }
+  let lineSeed = 1;
+  function renderLineage() {
+    const k = $('linePlan').value, amt = +$('lineAmt').value, el = $('lineage');
+    el.innerHTML = '';
+    lineLive.length = 0;
+    const r = new WS.RNG((+$('seed').value || 1) * 31 + lineSeed * 977 + k.length);
+    let g = C.genome(r);
+    const tr = traitsFor(k, r);
+    for (let gen = 0; gen <= 12; gen++) {
+      const c = card(g, tr, 116, { cls: 'gen', text: gen === 0 ? '조상' : gen + '세대' }, '', lineLive);
+      c.querySelector('.desc').remove();
+      c.title = C.describe(g, tr);
+      el.appendChild(c);
+      g = C.mutate(g, r, amt);
+    }
+  }
+  function renderSprites() {
+    const el = $('sprites');
+    el.innerHTML = '';
+    const r = new WS.RNG(4242);
+    for (const k of PLAN_KEYS) {
+      const g = C.genome(r), tr = traitsFor(k, r), land = tr.land, row = document.createElement('div');
+      row.className = 'sprite';
+      const bg = land ? '#3f5a35' : tr.cx >= 2 ? '#1f4d66' : '#1d3a4f';
+      for (const s of [24, 32]) {
+        const cv = makeCanvas(s + 8, bg);
+        const x = cv.getContext('2d'); x.setTransform(dpr, 0, 0, dpr, 0, 0);
+        x.drawImage(C.portrait(g, tr, s, 'tiny-' + k), 4, 4, s, s);
+        row.appendChild(cv);
+      }
+      const t = document.createElement('span'); t.textContent = C.PLANS[k].label; row.appendChild(t);
+      el.appendChild(row);
+    }
+  }
+  function measure() {
+    const out = $('perf'), cv = makeCanvas(64), x = cv.getContext('2d');
+    x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const r = new WS.RNG(99), rows = [];
+    let worst = 0, total = 0, count = 0;
+    for (const k of PLAN_KEYS) {
+      const gs = []; for (let i = 0; i < 8; i++) { const g = C.genome(r); g.form = i; gs.push([g, traitsFor(k, r)]); }
+      for (const [g, tr] of gs) C.draw(x, g, tr, 32, 32, 32); // 예열
+      const N = 40, t0 = performance.now();
+      for (let i = 0; i < N; i++) { const [g, tr] = gs[i % gs.length]; C.draw(x, g, tr, 32, 32, 32, { t: i * 0.1 }); }
+      const ms = (performance.now() - t0) / N;
+      worst = Math.max(worst, ms); total += ms; count++;
+      rows.push(k.padEnd(10) + ms.toFixed(3) + ' ms');
+    }
+    const g = C.genome(r), tr = C.PLANS.grazer.traits;
+    C.portrait(g, tr, 32, 'perf');
+    const t1 = performance.now();
+    for (let i = 0; i < 2000; i++) x.drawImage(C.portrait(g, tr, 32, 'perf'), 0, 0, 32, 32);
+    const cached = (performance.now() - t1) / 2000;
+    out.textContent = `32px 직접 그리기: 평균 ${(total / count).toFixed(3)} ms · 가장 느린 설계 ${worst.toFixed(3)} ms\n캐시된 초상화 찍기: ${(cached * 1000).toFixed(1)} µs\n\n` + rows.join('\n');
+    return { avg: total / count, worst, cached, rows };
+  }
+  window.creatureMeasure = measure;
+  // 컨트롤
+  for (const k of PLAN_KEYS) {
+    const o = document.createElement('option'); o.value = k; o.textContent = C.PLANS[k].label; $('filter').appendChild(o);
+    const o2 = o.cloneNode(true); $('linePlan').appendChild(o2);
+  }
+  $('linePlan').value = 'grazer';
+  $('reroll').onclick = () => { $('seed').value = (+$('seed').value || 1) + 1; renderPlans(); };
+  ['seed', 'size', 'filter'].forEach((id) => ($(id).onchange = renderPlans));
+  $('outline').onchange = () => allLive().forEach((o) => paint(o));
+  if (narrow.addEventListener) narrow.addEventListener('change', renderPlans);
+  $('linePlan').onchange = renderLineage; $('lineAmt').onchange = renderLineage;
+  $('lineNew').onclick = () => { lineSeed++; renderLineage(); };
+  $('perfBtn').onclick = measure;
+  let raf = 0;
+  const tick = (ts) => {
+    if (!$('anim').checked) { raf = 0; return; }
+    const t = ts / 1000, vh = innerHeight;
+    for (const o of allLive()) { const b = o.cv.getBoundingClientRect(); if (b.bottom > 0 && b.top < vh) paint(o, t); }
+    raf = requestAnimationFrame(tick);
+  };
+  $('anim').onchange = () => { if ($('anim').checked && !raf) raf = requestAnimationFrame(tick); if (!$('anim').checked) allLive().forEach((o) => paint(o)); };
+  renderPlans();
+  renderSprites();
+})();
+</script>
+</body>
+</html>
