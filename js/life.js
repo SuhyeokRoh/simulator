@@ -106,6 +106,9 @@
       this.biomass = 0;
       this.dt = 3;
       this._evSp = 0;
+      // 태양계 보기 전용 기록과 이어받은 행성 목록 (세계의 진행에는 쓰지 않음)
+      this.impacts = []; this.impactN = 0; this.bigImpacts = [];
+      this.system = (inherit && inherit.system) || null;
       this.terrain(true);
       this.climate();
     }
@@ -173,9 +176,10 @@
     iceLandShift() { return this.iceFrac > 0.3 ? (this.iceFrac - 0.3) * 0.08 : 0; }
 
     /* ----- 기후와 대기 ----- */
+    starLum() { return 1 / (1 + 0.4 * (1 - this.t / this.tRef)); }
     climate() {
       const P = this.P, tG = this.t;
-      const lum = 1 / (1 + 0.4 * (1 - tG / this.tRef));
+      const lum = this.starLum();
       const S = P.flux * lum;
       const alb = 0.29 + 0.42 * this.iceFrac;
       const Te = 255 * Math.pow(Math.max(0.01, (S * (1 - alb)) / 0.71), 0.25);
@@ -660,10 +664,17 @@
       if (D >= 400) { this.Tg += 300; for (const s of this.species) if (s.energy !== 'chemo') s.pop.fill(0); }
       // 넓은 지역의 생물을 실제로 죽일 만한 충돌만 대멸종의 원인 후보로 기억 (작은 운석은 한두 칸만 태움)
       if (D >= 25) this.lastCat = { t: this.t, kind: `소행성 충돌 (지름 ${Math.round(D)} km)` };
-      if (!this.headless && (D >= 15 || this.fxAll)) {
-        const p = this.cellXY(c);
-        this.addFx({ type: 'flash', x: p[0], y: p[1], r: 0.02 + D / 1500, life: 1.6, color: [255, 210, 150] });
-        this.addFx({ type: 'ring', x: p[0], y: p[1], r: 0.04 + D / 600, r0: 3, life: 2.2, color: [255, 150, 90] });
+      if (D >= 15 || this.fxAll) {
+        const rec = { n: ++this.impactN, t: this.t, D, c, god: !!this.fxAll };
+        this.impacts.push(rec);
+        if (this.impacts.length > 16) this.impacts.shift();
+        // 충돌 장면으로 보여 줄 것: 연대기에 재난으로 적히는 크기이거나 관찰자가 떨어뜨린 것. 작은 것까지 보여 주면 장면이 끊이지 않음
+        if (D >= 40 || this.fxAll) { this.bigImpacts.push(rec); if (this.bigImpacts.length > 8) this.bigImpacts.shift(); }
+        if (!this.headless) {
+          const p = this.cellXY(c);
+          this.addFx({ type: 'flash', x: p[0], y: p[1], r: 0.02 + D / 1500, life: 1.6, color: [255, 210, 150] });
+          this.addFx({ type: 'ring', x: p[0], y: p[1], r: 0.04 + D / 600, r0: 3, life: 2.2, color: [255, 150, 90] });
+        }
       }
       return c;
     }
@@ -697,9 +708,10 @@
         this.lipPending = 0; this.lipLogT = this.t;
       }
     }
+    impactRate() { return 0.04 * (1 + 60 * Math.exp(-this.t / 160)) * (this.P.giant ? 1 : 2.2) * this.impactMul; }
     hazards() {
       const r = this.rng, t = this.t, dt = this.dt;
-      const lam = 0.04 * (1 + 60 * Math.exp(-t / 160)) * (this.P.giant ? 1 : 2.2) * this.impactMul;
+      const lam = this.impactRate();
       const n = r.poisson(lam * dt);
       for (let k = 0; k < n; k++) {
         const D = 5 * Math.pow(r.next(), -0.5);
@@ -885,7 +897,7 @@
     }
     return true;
   }
-  function ensureElev(s, V) {
+  function ensureElev(s, V, budget = 2) {
     if (!V.elev) {
       // 첫 프레임: 1/4 해상도로 빨리 만들어 부드럽게 늘려 쓰고, 이후 프레임에서 원래 해상도로 다시 계산
       const F = 4, hw = TW / F, hh = TH / F, tG = s.terrainT / 1000, E = new Float32Array(TW * TH), half = new Float32Array(hw * hh);
@@ -906,7 +918,7 @@
       return;
     }
     if (!V.job && (V.elevT !== s.terrainT || V.lowres)) { V.job = { t: s.terrainT, y: 0, buf: V.spare || new Float32Array(TW * TH), shade: V.spareSh || new Float32Array(TW * TH) }; V.lowres = false; }
-    if (V.job && elevRows(s, V, V.job, 2)) {
+    if (V.job && elevRows(s, V, V.job, budget)) {
       V.spare = V.elev; V.spareSh = V.shade;
       V.elev = V.job.buf; V.shade = V.job.shade; V.elevT = V.job.t; V.job = null;
       V.force = true;
@@ -938,6 +950,9 @@
     out[0] = a[0] + (b[0] - a[0]) * t; out[1] = a[1] + (b[1] - a[1]) * t; out[2] = a[2] + (b[2] - a[2]) * t;
   }
   /* 풍경·기온 텍스처 칠하기: 몇 줄씩 나눠서 (한 프레임 예산 안에서) */
+  // 뜨거운 행성으로 그릴 때: 바다가 생기기 전까지는 식어 가는 겉껍질이지 맨땅이 아님
+  const STEAM_AIR = [196, 170, 150]; // 수증기
+  const molten = (s) => s.Tg > 100 || (!s.reached.ocean && s.Tg > 30);
   function paintRows(s, V, P, budget) {
     const t0 = performance.now();
     const d = P.img.data, E = V.elev, SH = V.shade, W = s.W, F = P.F;
@@ -970,12 +985,15 @@
           const heat = WS.clamp((Tg - 100) / 1800, 0, 1);
           const cr = Math.abs(Math.sin(e * 38 + x * 0.013) + 0.6 * Math.sin(e * 91 - y * 0.021));
           const k = Math.max(1 - smooth(0, 0.42 + heat * 0.25, cr), heat * 0.3);
-          const kk = k * k;
+          const kk = k * k * (1 - P.cool);
           r = COL.crust[0] + (COL.lava[0] - COL.crust[0]) * kk; g = COL.crust[1] + (COL.lava[1] - COL.crust[1]) * kk; b = COL.crust[2] + (COL.lava[2] - COL.crust[2]) * kk;
+          // 100°C 아래로 식으면 균열이 잦아들고 어두운 바위가 드러남
+          if (P.cool > 0) { r += (COL.rockOld[0] - r) * P.cool; g += (COL.rockOld[1] - g) * P.cool; b += (COL.rockOld[2] - b) * P.cool; }
           if (P.ocean && !isLand) { r = r * 0.55 + 70; g = g * 0.55 + 40; b = b * 0.55 + 36; }
           r *= sh; g *= sh; b *= sh;
         } else if (!isLand) {
-          if (T < -2) { P.snow = true; r = COL.seaIce[0]; g = COL.seaIce[1]; b = COL.seaIce[2]; const k = 0.92 + (sh - 1) * 0.3; r *= k; g *= k; b *= k; }
+          // 구로 보면 곧은 해빙 경계가 눈에 띄므로, 겉모습에서는 수심에 따라 경계를 구불구불하게 함
+          if (P.wavy ? T + (sea - e - 0.15) * 24 < -2 : T < -2) { P.snow = true; r = COL.seaIce[0]; g = COL.seaIce[1]; b = COL.seaIce[2]; const k = 0.92 + (sh - 1) * 0.3; r *= k; g *= k; b *= k; }
           else {
             const dep = WS.clamp((sea - e) / dmax, 0, 1);
             if (dep < 0.09) { const t = dep / 0.09; r = COL.shelf[0] + (COL.mid[0] - COL.shelf[0]) * t; g = COL.shelf[1] + (COL.mid[1] - COL.shelf[1]) * t; b = COL.shelf[2] + (COL.mid[2] - COL.shelf[2]) * t; }
@@ -999,7 +1017,8 @@
           r = COL.snow[0] * k; g = COL.snow[1] * k; b = Math.min(255, COL.snow[2] * k + 6);
         } else {
           // 맨땅: 낮은 곳은 갈색, 높은 곳은 회색, 더운 곳은 모래
-          const rl = P.young ? COL.rockOld : COL.rockLow, hh = Math.pow(Math.min(1, h), 0.8);
+          // 바다가 없는 행성은 해수면이 지형 아래에 있어 h가 모두 1에 가까움: 지형의 가장 낮은 곳부터 잼
+          const rl = P.young ? COL.rockOld : COL.rockLow, hh = Math.pow(WS.clamp((e - P.base) / P.bspan, 0, 1), 0.8);
           r = rl[0] + (COL.rockHigh[0] - rl[0]) * hh; g = rl[1] + (COL.rockHigh[1] - rl[1]) * hh; b = rl[2] + (COL.rockHigh[2] - rl[2]) * hh;
           const mo = F.moss[c00] * w00 + F.moss[c10] * w10 + F.moss[c01] * w01 + F.moss[c11] * w11;
           const fo = F.forest[c00] * w00 + F.forest[c10] * w10 + F.forest[c01] * w01 + F.forest[c11] * w11;
@@ -1029,6 +1048,14 @@
     }
     return P.y >= TH;
   }
+  function paintJob(s, tv, stamp, img) {
+    const base = s.emin !== undefined && s.sea < s.emin ? s.emin : s.sea;
+    return {
+      y: 0, view: tv, stamp, img, F: lifeFields(s), base, bspan: Math.max(0.05, s.emax - base), cool: s.Tg < 100 ? 1 - smooth(30, 100, s.Tg) : 0,
+      sea: s.sea, span: Math.max(0.05, s.emax - s.sea), dmax: Math.max(0.05, s.sea - (s.emin !== undefined ? s.emin : s.sea - 0.6)),
+      Tg: s.Tg, hot: molten(s), ocean: !!s.reached.ocean, young: s.t < 800, iron: s.reached.ocean ? 0.42 * (1 - Math.min(1, s.o2 / 0.004)) : 0,
+    };
+  }
   function texFor(s, V, view, nowMs) {
     // view 1(생물 분포)은 풍경 텍스처를 흐리게 깔아 씀
     const tv = view === 2 ? 2 : 0;
@@ -1036,16 +1063,13 @@
       const cv = document.createElement('canvas'); cv.width = TW; cv.height = TH;
       V.tex[tv] = cv; V.img[tv] = cv.getContext('2d').createImageData(TW, TH); V.paintedAt = V.paintedAt || {};
     }
+    const B0 = tv === 0 && V.surf;
+    if (B0 && B0.ver && B0.ts > (V.tex0Ts || 0)) { V.tex[0].getContext('2d').putImageData(new ImageData(B0.rgba, TW, TH), 0, 0); V.tex0Ts = B0.ts; }
     let P = V.paint[tv];
     const stamp = s.steps + ':' + V.elevT;
     const due = V.paintedAt[tv] === undefined || V.force || (V.paintedAt[tv] !== stamp && nowMs - (V.paintTs || 0) > 120);
     if (!P && due) {
-      const hot = s.Tg > 100;
-      P = V.paint[tv] = {
-        y: 0, view: tv, stamp, img: V.img[tv], F: lifeFields(s),
-        sea: s.sea, span: Math.max(0.05, s.emax - s.sea), dmax: Math.max(0.05, s.sea - (s.emin !== undefined ? s.emin : s.sea - 0.6)),
-        Tg: s.Tg, hot, ocean: !!s.reached.ocean, young: s.t < 800, iron: s.reached.ocean ? 0.42 * (1 - Math.min(1, s.o2 / 0.004)) : 0,
-      };
+      P = V.paint[tv] = paintJob(s, tv, stamp, V.img[tv]);
       V.force = false;
       // 그을린 자국을 그리는 동안(과 그 뒤 몇 초)은 범례에 설명을 띄움
       if (tv === 0 && P.F.scorch.some((v) => v > 0.05)) V.scorchMs = nowMs;
@@ -1055,7 +1079,7 @@
       if (paintRows(s, V, P, first ? 7 : 2.5)) {
         V.tex[tv].getContext('2d').putImageData(P.img, 0, 0);
         V.paintedAt[tv] = P.stamp; V.paintTs = nowMs; V.paint[tv] = null;
-        if (tv === 0) V.snow = !!P.snow;
+        if (tv === 0) { V.snow = !!P.snow; V.tex0Ts = nowMs; }
         V.texSea = P.sea;
       }
     }
@@ -1304,6 +1328,7 @@
   }
   function atmoColor(s) {
     if (s.Tg > 100) return [255, 120, 60];
+    if (molten(s)) return STEAM_AIR;
     if (s.inSnowball) return [200, 225, 245];
     if (s.o2 > 0.05) return [120, 180, 255];
     if (s.ch4 > 0.5) return [230, 150, 80];
@@ -1545,13 +1570,14 @@
     ];
   }
   function legend(s, view) {
+    if (view === SPACE_VIEW) return spaceLegend(s);
     if (view === 2) return [{ gradient: TEMP_STOPS.map((c) => WS.rgb(c)), from: '−40°C', to: '60°C' }, { color: '#f0f4fa', label: '0°C 선 (물이 어는 경계)' }];
     if (view === 1) {
       const top = s.species.slice().sort((a, b) => b.total - a.total).slice(0, 6);
       if (!top.length) return [{ color: '#3a4150', label: '아직 생물이 없습니다' }];
       return top.map((q) => ({ color: WS.rgb(q.color), label: `${s.kindName(q)} · ${q.name.split(' ')[0]}` })).concat([{ color: 'rgba(5,7,11,.6)', label: '칸마다 가장 많은 종의 색' }]);
     }
-    if (s.Tg > 100) return [{ gradient: [WS.rgb(COL.crust), WS.rgb(COL.lava)], from: '식어 굳은 겉껍질', to: '녹은 암석' }];
+    if (molten(s)) return [{ gradient: [WS.rgb(COL.crust), WS.rgb(COL.lava)], from: '식어 굳은 겉껍질', to: '녹은 암석' }];
     const L = [{ gradient: [WS.rgb(COL.shelf), WS.rgb(COL.mid), WS.rgb(COL.deep)], from: '얕은 바다', to: '깊은 바다' }, { color: WS.rgb(COL.rockLow), label: '맨땅 (바위·모래)' }];
     const has = (f) => s.species.some(f);
     if (has((q) => q.land && q.troph === 0)) L.push({ gradient: [WS.rgb(COL.moss), WS.rgb(COL.temperate), WS.rgb(COL.jungle)], from: '이끼', to: '숲' });
@@ -1795,6 +1821,8 @@
         const id = +b.dataset.id;
         const sim = el._lxOwner;
         sim._hl = sim._hl === id ? 0 : id;
+        // 서식지는 지도에 표시되므로 태양계 보기에서 눌렀다면 지도로 돌아감
+        if (sim._hl && WS.App && WS.App.sim === sim && WS.App.view === SPACE_VIEW) WS.App.setView(0);
         el.querySelectorAll('.lx-card').forEach((x) => x.setAttribute('aria-pressed', +x.dataset.id === sim._hl ? 'true' : 'false'));
         // 작은 지도가 펼쳐졌으면 바로 그리고, 화면 밖으로 밀려나지 않게 함 (넓은 화면에서는 작은 지도가 숨겨져 아무 일도 없음)
         const q = sim._hl === id ? sim.byId.get(id) : null, mini = b.querySelector('.lx-mini canvas');
@@ -1877,6 +1905,133 @@
     });
   }
 
+  /* ---------- 태양계 보기: 세계 상태를 읽기만 함 (화면 전용 값은 s._vis.space에 둠) ---------- */
+  const SPACE_VIEW = 3;
+  const BODY_FACT = {
+    mercury: '가장 안쪽 행성입니다. 공기가 거의 없어 낮과 밤의 온도 차가 아주 큽니다.',
+    venus: '두꺼운 구름이 온실처럼 열을 가두어 표면이 납도 녹일 만큼 뜨겁습니다.',
+    mars: '옅은 공기를 가진 붉은 사막 행성입니다. 옛날에 물이 흐른 흔적이 남아 있습니다.',
+    ceres: '소행성대에서 가장 큰 천체입니다. 얼음이 많습니다.',
+    jupiter: '가장 큰 행성입니다. 떠도는 소행성을 쓸어 내어 안쪽 행성에 떨어지는 충돌을 줄여 줍니다.',
+    europa: '목성의 위성입니다. 두꺼운 얼음 밑에 바다가 있습니다.',
+    ganymede: '목성의 위성으로, 위성 가운데 가장 큽니다. 자기장도 있습니다.',
+    saturn: '커다란 고리를 두른 가스 행성입니다.',
+    titan: '토성의 위성입니다. 두꺼운 대기와 메탄 호수가 있습니다.',
+    uranus: '옆으로 누운 채 도는 얼음 거인입니다.',
+    neptune: '가장 바깥쪽 행성입니다. 얼음 거인이고 바람이 아주 거셉니다.',
+    triton: '해왕성의 위성입니다. 행성이 도는 방향과 거꾸로 돕니다.',
+  };
+  const STALE_MYR = 150; // 자연 충돌은 이만큼(백만 년) 지나면 장면으로 틀지 않음. 늦게 틀면 자막의 시각과 화면의 행성이 어긋남
+  const LOOK_NAME = { gas: '가스로 된 거대 행성', ice: '얼음으로 덮인 행성', ocean: '물이 있는 돌 행성', rocky: '메마른 돌 행성' };
+  function spaceOf(s) {
+    const V = visOf(s);
+    if (V.space) return V.space;
+    const P = s.P, sys = WS.systemBodies(s.system, { moon: P.moon, giant: P.giant, homeName: P.kind === 'earth' ? '지구' : P.name });
+    const home = sys.bodies.find((b) => b.home);
+    const key = s.system ? 'sys:' + s.seed : P.kind === 'earth' && P.moon && P.giant ? 'solar' : `solar:${home.name}:${P.moon ? 1 : 0}${P.giant ? 1 : 0}`;
+    return (V.space = {
+      key, star: sys.star, bodies: sys.bodies, belt: sys.belt, hidden: sys.hidden || 0, staleAfter: STALE_MYR, clock: s.t, bombard: 0, impacts: [], settlements: [], traffic: 0, interstellar: null, homeEmpty: false, caption: '', emptyNote: null,
+      home: { id: home.id, name: home.name, atmosphere: atmoColor(s), surface: () => surfaceOf(s), dust: 0, popText: null },
+      glow0: sys.star.glow, seen: 0,
+    });
+  }
+  /* 우주에서 본 행성 겉모습 (행성이 크게 보일 때만 불림). 지도와 같은 색 계산을 쓰되 버퍼를 따로 두어 지도 텍스처 캐시는 읽기만 함.
+     지도를 그리는 중이면 그 그림을 복사하고, 태양계 보기에서는 space.before가 프레임마다 조금씩 칠해 둠 (한 번에 칠하면 수십 ms라 장면이 끊김) */
+  function surfaceBuf(V) {
+    return V.surf || (V.surf = { w: TW, h: TH, rgba: new Uint8ClampedArray(TW * TH * 4), back: new Uint8ClampedArray(TW * TH * 4), lights: null, ver: 0, stamp: null, job: null, ts: -1e9 });
+  }
+  function surfaceStep(s, V, budget, nowMs) {
+    const B = surfaceBuf(V);
+    if (!B.job) {
+      const stamp = s.steps + ':' + V.elevT;
+      if (B.stamp === stamp || nowMs - B.ts < 1000) return false;
+      B.job = paintJob(s, 0, stamp, { data: B.back });
+      B.job.wavy = true;
+      B.job.F.scorch.fill(0); // 불탄 자국은 충돌 장면이 직접 그림 (돌이 닿기 전에 미리 보이면 안 됨)
+    }
+    if (paintRows(s, V, B.job, budget)) {
+      const t = B.rgba; B.rgba = B.back; B.back = t;
+      B.stamp = B.job.stamp; B.hot = B.job.hot; B.job = null; B.ts = nowMs; B.ver++;
+    }
+    return true;
+  }
+  function surfaceOf(s) {
+    const V = visOf(s), B = surfaceBuf(V), nowMs = performance.now();
+    if (V.tex0Ts > B.ts) { B.rgba.set(V.img[0].data); B.stamp = null; B.hot = molten(s); B.ts = V.tex0Ts; B.ver++; return B; }
+    if (!V.elev) ensureElev(s, V);
+    surfaceStep(s, V, B.ver ? 3 : 0, nowMs);
+    return B;
+  }
+  function impactView(s, q) {
+    const x = q.c % s.W, y = (q.c / s.W) | 0;
+    return { n: q.n, D: q.D, t: q.t, user: !!q.god, lo: ((x + 0.5) / s.W) * 360 - 180, la: 90 - ((y + 0.5) / s.H) * 180, title: `지름 ${Math.round(q.D)} km 소행성`, sub: '행성 나이 ' + WS.fmtYears(q.t * 1e6) };
+  }
+  function spaceSeq(s) { const b = s.bigImpacts; return b.length ? b[b.length - 1].n : 0; }
+  // 앱이 태양계 보기에서는 render 대신 부름: 끝 카드 그림을 유지하고, 충돌 장면에 쓸 지형과 겉모습을 한 프레임 1 ms 안쪽으로 따라오게 함
+  function spaceBefore(s, app) {
+    if (s.ended) syncEndArt(s, app);
+    const V = visOf(s);
+    if (!V.elev || !surfaceStep(s, V, 1, performance.now())) ensureElev(s, V, 1);
+  }
+  // 떨어지는 소행성의 빈도: 초기 대폭격 때 1, 대폭격이 끝나면 거의 0
+  const spaceBombard = (s) => WS.clamp((s.impactRate() - 0.04) / 2.4, 0, 1);
+  function scene(s) {
+    const S = spaceOf(s), seq = spaceSeq(s);
+    if (seq !== S.seen) { S.seen = seq; S.impacts = s.bigImpacts.map((q) => impactView(s, q)); }
+    // 별은 나이가 들수록 조금씩 밝아짐 (이어받은 행성의 P.flux는 별 밝기가 아니라 궤도 거리에서 온 값)
+    S.star.glow = WS.clamp(S.glow0 * s.starLum() * (s.P.kind === 'inherit' ? cond(s, 'flux', 1) : s.P.flux), 0.6, 1.8);
+    S.bombard = spaceBombard(s);
+    // 칠해 둔 표면은 조금 늦으니 구름과 대기도 그 표면에 맞춥니다: 용암 위에 흰 구름이 뜨지 않게
+    const surf = visOf(s).surf, steam = surf && surf.ver ? !!surf.hot : molten(s);
+    S.home.steam = steam;
+    S.home.atmosphere = steam ? STEAM_AIR : atmoColor(s);
+    // 충돌 흙먼지. 충돌 장면이 직접 그리는 몫이 있으니 약하게: 돌이 닿기 전부터 행성이 뿌옇거나 대폭격 때 용암이 가려지면 안 됨
+    S.home.dust = WS.clamp(s.winter / 120 + s.darkness * 0.25, 0, 0.5);
+    S.caption = s.timeLabel();
+    S.clock = s.t;
+    return S;
+  }
+  function homeFacts(s, name) {
+    const R = s.reached, sap = s.sapientSp && !s.sapientSp.extinct ? s.sapientSp : null;
+    const sea = s.Tg > 100 ? (R.ocean ? '바다가 끓고 있습니다' : '표면이 녹아 있어 아직 바다가 없습니다') : s.inSnowball ? '바다까지 얼음에 덮여 있습니다' : s.oceanFrac > 0.02 ? `바다가 표면의 ${Math.round(s.oceanFrac * 100)}%를 덮고 있습니다` : '바다가 거의 없습니다';
+    const n = s.species.length, life = !n ? (R.life ? '생명이 모두 사라졌습니다' : s.ended ? '생명이 태어나지 않았습니다' : '아직 생명이 없습니다') : `생물 ${n}종이 살고 있습니다`;
+    return [name, `평균 기온 ${Math.round(s.Tg)}°C`, sea, life].concat(sap ? [`지성 종: ${sap.name}`] : []);
+  }
+  function spaceInspect(s, id) {
+    const S = spaceOf(s), b = S.bodies.find((q) => q.id === id);
+    if (id === 'sun' || id === 'star') {
+      const st = s.system && s.system.star;
+      return [S.star.name, '행성들을 붙잡아 두고 빛과 열을 보내는 별입니다. 나이가 들수록 조금씩 밝아집니다.', st ? `질량: 태양의 ${WS.trimNum(st.mass)}배` : `지금 밝기: 오늘날 태양의 ${Math.round(s.P.flux * s.starLum() * 100)}%`];
+    }
+    if (!b) return null;
+    if (b.home) return homeFacts(s, b.name);
+    const lines = [b.name];
+    if (b.parent) {
+      const pa = S.bodies.find((q) => q.id === b.parent);
+      lines.push(id === 'moon' ? `${pa ? pa.name : S.home.name}의 위성입니다. 자전축을 붙잡아 기후가 크게 흔들리지 않게 해 줍니다.` : BODY_FACT[id] || '거대 행성 둘레를 도는 위성입니다.');
+      return lines;
+    }
+    const q = s.system && s.system.planets ? s.system.planets.find((p) => p.name === b.name) : null;
+    if (q) {
+      lines.push(q.m >= 10 && q.m < 50 ? '얼음 거인' : LOOK_NAME[b.look] || '행성', `질량: 지구의 ${WS.trimNum(q.m)}배`);
+      if (q.moons > 0) lines.push(`위성 ${q.moons}개`);
+    } else if (BODY_FACT[id]) lines.push(BODY_FACT[id]);
+    lines.push(`${S.star.name}까지 거리: 지구와 태양 사이의 ${WS.trimNum(q && q.au > 0 ? q.au : b.a)}배`);
+    return lines;
+  }
+  function spaceLegend(s) {
+    const S = spaceOf(s), P = s.P;
+    const L = [{ color: WS.rgb(atmoColor(s)), label: `${S.home.name}: 지켜보는 행성` }];
+    if (S.belt) L.push({ color: '#a89f8e', label: '작은 점의 띠: 소행성대' });
+    if (spaceBombard(s) > 0.03) L.push({ color: '#f1cb86', label: '희미한 빛줄기: 쏟아지는 소행성' });
+    L.push({ color: '#ff9a5a', label: '큰 충돌은 가까이 다가가 보여 줍니다' });
+    if (!s.system) {
+      if (!P.giant) L.push({ color: '#6b7280', label: '목성 같은 거대 가스 행성이 없어 소행성이 2배 넘게 자주 옵니다' });
+      if (!P.moon) L.push({ color: '#6b7280', label: '달이 없어 기후가 더 크게 흔들립니다' });
+    }
+    return L;
+  }
+
   /* ---------- 실험실 연결 ---------- */
   const HORIZONS = [[1e9, '10억 년'], [2e9, '20억 년'], [3e9, '30억 년'], [4.57e9, '45.7억 년 (오늘의 지구 나이)', true], [6.2e9, '62억 년 (먼 미래)']];
   const mulFmt = (v) => '×' + (v >= 10 ? Math.round(v) : v.toFixed(2).replace(/0+$/, '').replace(/\.$/, ''));
@@ -1895,10 +2050,18 @@
     baseRate: 22,
     sampleEvery: 5,
     powerRegenSec: 6,
-    views: ['풍경', '생물 분포', '기온'],
+    views: ['풍경', '생물 분포', '기온', '태양계'],
     create: (opts, seed, inherit) => new Life(opts, seed, inherit),
     step: (s) => s.tick(),
     render,
+    space: {
+      view: SPACE_VIEW,
+      scene,
+      inspect: spaceInspect,
+      impactSeq: spaceSeq,
+      before: spaceBefore,
+      site(s, imp, W, H) { const R = lastRect(s, W, H); return imp.lo == null ? null : [R.x0 + ((imp.lo + 180) / 360) * R.w, R.y0 + ((90 - imp.la) / 180) * R.h]; },
+    },
     era,
     stats,
     legend,
@@ -2088,6 +2251,7 @@
           plant: Array.from({ length: s.NC }, (_, c) => s.species.reduce((m, q) => m + (q.land && q.troph === 0 && q.pop ? q.pop[c] : 0), 0)),
           start: best, species: sp.name, planet: s.P.name, Tg: s.Tg, co2: s.co2,
           genome: s.genomeOf(sp), traits: s.traitsOf(sp), kind: s.kindName(sp),
+          system: s.system || null, moon: s.P.moon, giant: s.P.giant,
         },
       };
     },

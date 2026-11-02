@@ -143,6 +143,7 @@ h1, h2, h3, h4 { text-wrap: balance; }
 .vp-in { position: absolute; inset: 0; }
 #view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: manipulation; }
 #view.aiming { cursor: crosshair; }
+#view.hot { cursor: pointer; }
 #viewWrap { display: contents; }
 
 /* 지도 위 안내층: 왼쪽 위 해설, 오른쪽 위 보기 전환, 왼쪽 아래 범례, 오른쪽 아래 알림. 가운데는 비워 둡니다.
@@ -180,7 +181,7 @@ h1, h2, h3, h4 { text-wrap: balance; }
 
 .views { pointer-events: auto; display: flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--glass); max-width: 100%; flex-wrap: wrap; }
 .views .vl { font-size: 11.5px; color: var(--muted); padding: 0 8px 0 10px; }
-.views button { border: 0; background: transparent; padding: 6px 11px; font-size: 12.5px; color: var(--muted); }
+.views button { border: 0; background: transparent; padding: 6px 11px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
 .views button:hover { color: var(--text); }
 .views button[aria-pressed="true"] { background: var(--ink-3); color: var(--text); box-shadow: inset 0 -2px 0 var(--brass); }
 
@@ -237,6 +238,7 @@ h1, h2, h3, h4 { text-wrap: balance; }
 .speeds button:hover { color: var(--text); }
 .speeds button[aria-pressed="true"] { background: var(--ink-3); color: var(--text); box-shadow: inset 0 -2px 0 var(--brass); }
 .rate { font-family: var(--f-mono); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rate:empty::before { content: '\00a0'; }
 
 /* 개입줄 */
 .controls { grid-row: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 9px 12px 11px; background: var(--ink); border-top: 1px solid var(--line-soft); }
@@ -437,6 +439,16 @@ table.cmp td.v.miss { color: var(--faint); }
   .timeline { flex-basis: 100%; order: 3; }
   .speeds button { padding: 6px 8px; font-size: 12px; }
 }
+/* 보기 탭이 많은 문명 단계도 좁은 휴대폰에서 한 줄에 들어가게 합니다. */
+@media (max-width: 400px) {
+  .views button { padding: 6px 8px; }
+  .views .vl { padding: 0 4px 0 8px; }
+}
+@media (max-width: 340px) {
+  .views button { padding: 6px 7px; }
+  .crumb-actions .btn { padding: 5px 5px; gap: 3px; }
+  .speeds button { padding: 6px 6px; }
+}
 @media (prefers-reduced-motion: reduce) {
   .toast, #narration, #guide .spot, .qcard { animation: none; transition: none; }
 }
@@ -565,7 +577,7 @@ table.cmp td.v.miss { color: var(--faint); }
               <p id="narration" aria-live="polite"></p>
               <button class="nar-more" id="narMore" type="button" hidden aria-expanded="false" aria-controls="narration">더 보기</button>
             </div>
-            <div class="views" id="views" role="group" aria-label="지도 보기 방식"></div>
+            <div class="views" id="views" role="group" aria-label="보기 방식"></div>
           </div>
           <div class="hud-bottom">
             <div class="legendbox glass" id="legendBox" hidden>
@@ -658,6 +670,7 @@ table.cmp td.v.miss { color: var(--faint); }
 <script src="js/stellar.js"></script>
 <script src="js/life.js"></script>
 <script src="js/civ.js"></script>
+<script src="js/spaceview.js"></script>
 <script src="js/labcore.js"></script>
 <script src="js/app.js"></script>
 <script src="js/lab.js"></script>

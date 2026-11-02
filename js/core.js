@@ -328,6 +328,65 @@
     return s;
   };
 
+  /* ---------- 태양계 표 (태양계 뷰용 자료, 세계의 동역학에는 쓰지 않음) ---------- */
+  // 행성의 a는 AU, 위성의 a는 어미 행성에서 떨어진 화면 단위
+  WS.SOLAR_BODIES = [
+    { id: 'mercury', name: '수성', a: 0.39, look: 'mercury', size: 0.42 }, { id: 'venus', name: '금성', a: 0.72, look: 'venus', size: 0.72 },
+    { id: 'earth', name: '지구', a: 1, look: 'earth', size: 0.78, home: true }, { id: 'moon', name: '달', a: 0.42, parent: 'earth', look: 'moon', size: 0.26 },
+    { id: 'mars', name: '화성', a: 1.52, look: 'mars', size: 0.56 }, { id: 'ceres', name: '세레스', a: 2.77, look: 'ceres', size: 0.2 },
+    { id: 'jupiter', name: '목성', a: 5.2, look: 'jupiter', size: 1.5 }, { id: 'europa', name: '유로파', a: 0.5, parent: 'jupiter', look: 'europa', size: 0.18 }, { id: 'ganymede', name: '가니메데', a: 0.72, parent: 'jupiter', look: 'ganymede', size: 0.22 },
+    { id: 'saturn', name: '토성', a: 9.58, look: 'saturn', size: 1.3, rings: true }, { id: 'titan', name: '타이탄', a: 0.7, parent: 'saturn', look: 'titan', size: 0.22 },
+    { id: 'uranus', name: '천왕성', a: 19.2, look: 'uranus', size: 0.92 }, { id: 'neptune', name: '해왕성', a: 30.1, look: 'neptune', size: 0.9 }, { id: 'triton', name: '트리톤', a: 0.55, parent: 'neptune', look: 'triton', size: 0.16 },
+  ];
+  const STAR_SUN = [255, 236, 200];
+  const starLook = (mass) => {
+    const m = mass > 0 ? mass : 1;
+    return { color: m < 0.5 ? [255, 184, 124] : m < 0.85 ? [255, 214, 158] : m < 1.25 ? STAR_SUN : [214, 228, 255], glow: WS.clamp(Math.pow(m, 0.6), 0.6, 1.8) };
+  };
+  /* 이어받은 행성 목록을 화면에 그릴 천체 목록으로 바꿉니다 (DOM 없음, 난수 없음).
+     system: { star: { mass, lum?, name? }, planets: [{ name, a, m, w, e, moons }], home: 이름 } 또는 null
+     flags: { moon, giant, homeName } — system이 null일 때 태양계 표에 적용합니다 (moon·giant가 false면 뺌, homeName은 고향 행성 이름)
+     → { bodies, belt, star, hidden } (hidden = 자리가 없어 그리지 않은 작은 행성 수) */
+  WS.systemBodies = function (system, flags) {
+    flags = flags || {};
+    const list = system && Array.isArray(system.planets) ? system.planets.filter((p) => p && isFinite(p.a) && p.a > 0 && isFinite(p.m)) : [];
+    if (!list.length) {
+      const homeName = flags.homeName || null, other = !!homeName && homeName !== '지구';
+      const gone = new Set();
+      if (flags.moon === false) gone.add('moon');
+      if (flags.giant === false) ['jupiter', 'europa', 'ganymede', 'saturn', 'titan'].forEach((id) => gone.add(id));
+      const bodies = WS.SOLAR_BODIES.filter((b) => !gone.has(b.id)).map((b) => (b.home && homeName ? Object.assign({}, b, { name: homeName, look: other ? 'ocean' : b.look }) : Object.assign({}, b)));
+      return { bodies, belt: { a0: 2.2, a1: 3.3 }, star: { name: other ? '중심별' : '태양', color: STAR_SUN.slice(), glow: 1 }, hidden: 0 };
+    }
+    // 고향 행성은 늘 포함하고, 작은 천체는 이름이 있는 것만. 많으면 12개까지: 고향의 가까운 이웃(안팎 둘씩)을 먼저 남기고 나머지는 무거운 순서로
+    const hp = list.find((p) => p.name === system.home) || list.reduce((b, p) => (Math.abs(p.a - 1.3) < Math.abs(b.a - 1.3) ? p : b), list[0]);
+    const named = list.filter((p) => p === hp || (p.m >= 0.08 && p.name && p.name !== '이름 없는 작은 천체'));
+    const far = (p) => Math.abs(Math.log(p.a / hp.a));
+    const near = new Set();
+    [named.filter((p) => p !== hp && p.a < hp.a), named.filter((p) => p !== hp && p.a >= hp.a)].forEach((side) => side.filter((p) => p.m >= 0.3).sort((p, q) => far(p) - far(q)).slice(0, 2).forEach((p) => near.add(p)));
+    const rank = (p) => (p === hp ? 0 : near.has(p) ? 1 : 2);
+    const kept = named.slice().sort((p, q) => rank(p) - rank(q) || q.m - p.m).slice(0, 12).sort((p, q) => p.a - q.a);
+    const bodies = [];
+    kept.forEach((p, i) => {
+      const id = 'p' + i, gas = p.m >= 50, ice = !gas && p.m >= 10, wet = p.w >= 5e-5;
+      const look = gas ? 'gas' : ice ? 'ice' : p.w >= 0.1 ? 'ice' : wet ? 'ocean' : 'rocky';
+      const size = gas ? WS.clamp(0.78 * Math.pow(p.m, 0.12), 1, 1.8) : ice ? WS.clamp(0.78 * Math.pow(p.m, 0.06), 0.8, 1.1) : WS.clamp(0.78 * Math.pow(p.m, 0.27), 0.2, 1);
+      const b = { id, name: p.name, a: p.a, look, size, m: p.m };
+      if (p === hp) b.home = true;
+      if (gas || ice) b.giant = true;
+      bodies.push(b);
+      if (p === hp && p.moons > 0 && flags.moon !== false) bodies.push({ id: 'moon', name: '달', a: 0.42, parent: id, look: 'moon', size: 0.26 });
+      if (gas && p.moons > 0) bodies.push({ id: id + 'm', name: p.name + '의 위성', a: 0.68, parent: id, look: 'ganymede', size: 0.2 });
+    });
+    // 소행성대: 가장 안쪽 거대 행성의 바로 안쪽 (목성이면 실제 소행성대 자리). 별에 바짝 붙은 뜨거운 거대 행성은 건너뜁니다.
+    // 그 자리에 행성이 있거나(그리지 않은 것도 셈) 고향 궤도를 둘러싸면 두지 않습니다.
+    const g0 = kept.find((p) => p.m >= 50 && p.a >= 1.5);
+    const a0 = g0 ? g0.a * 0.42 : 0, a1 = g0 ? g0.a * 0.62 : 0;
+    const belt = g0 && a0 > hp.a * 1.08 && !list.some((p) => p.a >= a0 && p.a <= a1 && p.m >= 0.3) ? { a0, a1 } : null;
+    const st = system.star || {}, look = starLook(st.mass);
+    return { bodies, belt, star: { name: st.name || '중심별', color: look.color, glow: look.glow }, hidden: named.length - kept.length };
+  };
+
   /* ---------- 아이콘 ---------- */
   WS.icons = {
     bolt: '<path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z"/>',

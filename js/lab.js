@@ -12,6 +12,8 @@
   // 시작 표기: 로그 축의 첫 표본(1만 년 등)이나 0년은 실제 출발점이 아니므로 '처음'이라고 씁니다
   const startTxt = (X, x0) => (X.axis === 'log' || x0 === 0 ? '처음' : short(X.xfmt(x0)));
   const noParen = (t) => String(t).replace(/\s*\(.*\)\s*$/, '');
+  // 한국어 조사: 마지막 글자의 받침에 맞춰 붙임 (josa('화성', '이', '가') → '화성이')
+  const josa = (w, a, b) => { const s = String(w), ch = s.charCodeAt(s.length - 1); return s + (ch >= 0xac00 && ch <= 0xd7a3 && (ch - 0xac00) % 28 === 0 ? b : a); };
   const ORDER = ['universe', 'stellar', 'life', 'civ'];
   const STAGE_ICON = { universe: 'atom', stellar: 'sun', life: 'leaf', civ: 'users' };
   const CA = '#d8a85b', CB = '#84c6d2'; // A(또는 개입 안 함) = 황동, B(또는 개입함) = 청록
@@ -172,6 +174,7 @@
     const w = Math.round(box.clientWidth);
     if (!w) return;
     const c = cv.getContext('2d');
+    if (cfg.type === 'solar') { drawSolar(ch, c, w); return; }
     const G = layout(ch, c, w);
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(G.h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(G.h * dpr); cv.style.height = G.h + 'px'; }
@@ -337,13 +340,116 @@
     });
     ch.G = G;
   }
+  /* 태양계 그림: 왼쪽에 태양, 천체는 줄인 거리(로그)에 두고, 원의 넓이 = 그곳에 간 세계의 비율. 위성은 어미 행성 아래에 매답니다. */
+  function drawSolar(ch, c, w) {
+    const { cv, cfg } = ch, TAU = Math.PI * 2;
+    const tops = cfg.bodies.filter((b) => !b.parent), moons = cfg.bodies.filter((b) => b.parent && b.share > 0);
+    const rMax = Math.max(16, Math.min(24, w * 0.055));
+    const rOf = (b) => (b.share > 0 ? Math.max(3.5, rMax * Math.sqrt(b.share)) : b.home ? 5 : 2.6);
+    const showPct = w >= 420;
+    const a0 = Math.min(...tops.map((b) => b.a)), a1 = Math.max(...tops.map((b) => b.a));
+    const L = Math.max(46, w * 0.1), R = 24, xOf = (a) => L + (Math.log(a / a0) / Math.log(a1 / a0)) * (w - L - R);
+    const strong = (b) => b.share > 0 || b.home;
+    const fontOf = (b) => (strong(b) ? `600 12px ${FONT}` : `11px ${FONT}`);
+    // 이름표: 왼쪽부터, 겹치지 않는 가장 가까운 줄에 놓습니다
+    const items = (list, xAt) => list.map((b) => {
+      c.font = fontOf(b);
+      const ps = showPct && b.share > 0 ? pct(b.share) : '', nw = c.measureText(b.name).width, tw = nw + (ps ? c.measureText(' ' + ps).width : 0);
+      const x = xAt(b);
+      return { b, x, ps, nw, tw, tx: Math.max(tw / 2 + 1, Math.min(w - tw / 2 - 1, x)), row: 0 };
+    }).sort((p, q) => p.x - q.x);
+    const place = (its) => {
+      const ends = [];
+      its.forEach((it) => {
+        // 몇 픽셀만 밀면 들어가는 줄이 있으면 그 줄에 (줄이 쓸데없이 늘지 않게)
+        let k = ends.findIndex((e) => it.tx - it.tw / 2 + 4 >= e + 5 && Math.max(it.tx, e + 5 + it.tw / 2) + it.tw / 2 <= w - 1);
+        if (k < 0) { k = ends.length; ends.push(-Infinity); }
+        it.tx = Math.max(it.tx, ends[k] + 5 + it.tw / 2);
+        ends[k] = it.tx + it.tw / 2; it.row = k;
+      });
+      return ends.length;
+    };
+    const xTop = new Map(tops.map((b) => [b.id, xOf(b.a)]));
+    const topIt = items(tops, (b) => xTop.get(b.id));
+    // 위성: 같은 행성의 위성은 나란히
+    const kids = new Map();
+    moons.forEach((m) => { if (!kids.has(m.parent)) kids.set(m.parent, []); kids.get(m.parent).push(m); });
+    const xMoon = new Map();
+    kids.forEach((list, pid) => {
+      const tot = list.reduce((s, m) => s + rOf(m) * 2 + 3, -3);
+      let x = (xTop.get(pid) || 0) - tot / 2;
+      list.forEach((m) => { xMoon.set(m.id, x + rOf(m)); x += rOf(m) * 2 + 3; });
+    });
+    // 이웃 행성의 위성과 겹치면 오른쪽으로 밉니다
+    moons.slice().sort((p, q) => xMoon.get(p.id) - xMoon.get(q.id)).reduce((prev, m) => { if (prev) xMoon.set(m.id, Math.max(xMoon.get(m.id), xMoon.get(prev.id) + rOf(prev) + rOf(m) + 3)); return m; }, null);
+    const moonIt = items(moons, (m) => xMoon.get(m.id));
+    const rowsT = place(topIt), rowsM = place(moonIt), LH = 15;
+    const rTop = Math.max(...tops.map(rOf)), rM = moons.length ? Math.max(...moons.map(rOf)) : 0;
+    const sr = Math.min(25, L * 0.55), cy = Math.max(rowsT * LH + 18 + rTop, sr * 1.8), my = cy + rTop + rM + 9;
+    const h = Math.round(Math.max(moons.length ? my + rM + 6 + rowsM * LH + 2 : cy + rTop + 10, cy + sr * 1.8));
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + 'px'; }
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, w, h);
+    // 궤도
+    c.lineWidth = 1;
+    tops.forEach((b) => {
+      c.strokeStyle = b.home ? 'rgba(132,198,210,.34)' : 'rgba(146,154,171,.16)';
+      c.beginPath(); c.arc(0, cy, xTop.get(b.id), -Math.PI / 2, Math.PI / 2); c.stroke();
+    });
+    // 태양
+    const glow = c.createRadialGradient(0, cy, sr * 0.35, 0, cy, sr * 1.8);
+    glow.addColorStop(0, 'rgba(255,222,160,.55)'); glow.addColorStop(1, 'rgba(255,190,110,0)');
+    c.fillStyle = glow; c.beginPath(); c.arc(0, cy, sr * 1.8, -Math.PI / 2, Math.PI / 2); c.fill();
+    const disc = c.createRadialGradient(0, cy, 0, 0, cy, sr);
+    disc.addColorStop(0, '#fff6dc'); disc.addColorStop(0.75, '#ffdf9e'); disc.addColorStop(1, '#f4b860');
+    c.fillStyle = disc; c.beginPath(); c.arc(0, cy, sr, -Math.PI / 2, Math.PI / 2); c.fill();
+    c.font = `11px ${FONT}`; c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.fillStyle = '#d9c9a2';
+    c.fillText('태양', 2, cy + sr + 14);
+    // 위성을 어미 행성에 잇는 선
+    c.strokeStyle = 'rgba(216,168,91,.35)'; c.lineWidth = 1;
+    moons.forEach((m) => { c.beginPath(); c.moveTo(xTop.get(m.parent) || 0, cy); c.lineTo(xMoon.get(m.id), my); c.stroke(); });
+    const hits = [];
+    const body = (b, x, y) => {
+      const r = rOf(b), i = cfg.bodies.indexOf(b), hot = ch.hr === i;
+      hits.push({ x, y, r, i, tip: b.tip });
+      if (b.share > 0) {
+        c.fillStyle = CA; c.globalAlpha = hot ? 0.55 : 0.32; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); c.globalAlpha = 1;
+        c.strokeStyle = hot ? '#f1cb86' : CA; c.lineWidth = 1.5; c.beginPath(); c.arc(x, y, r, 0, TAU); c.stroke();
+        c.fillStyle = '#f1cb86'; c.beginPath(); c.arc(x, y, 1.8, 0, TAU); c.fill();
+      } else if (b.home) {
+        c.fillStyle = CB; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
+        c.strokeStyle = 'rgba(132,198,210,.45)'; c.lineWidth = 1; c.beginPath(); c.arc(x, y, r + 3, 0, TAU); c.stroke();
+      } else { c.fillStyle = hot ? '#a9b0bf' : '#6d7586'; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); }
+    };
+    tops.filter((b) => !b.home).concat(tops.filter((b) => b.home)).forEach((b) => body(b, xTop.get(b.id), cy)); // 지구는 맨 위에
+    moons.forEach((m) => body(m, xMoon.get(m.id), my));
+    // 이름표
+    const label = (it, y, x1, y1) => {
+      if (it.row > 0) { c.strokeStyle = 'rgba(146,154,171,.3)'; c.lineWidth = 1; c.beginPath(); c.moveTo(it.x, y1); c.lineTo(it.x, y + (y1 > y ? 3 : -13)); c.stroke(); }
+      const x0 = it.tx - it.tw / 2;
+      c.font = fontOf(it.b); c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+      c.fillStyle = it.b.home ? CB : it.b.share > 0 ? '#ebe4d3' : '#8d95a6';
+      c.fillText(it.b.name, x0, y);
+      if (it.ps) { c.fillStyle = '#f1cb86'; c.fillText(' ' + it.ps, x0 + it.nw, y); }
+    };
+    topIt.forEach((it) => label(it, cy - rTop - 7 - it.row * LH, it.x, cy - rOf(it.b) - 2));
+    moonIt.forEach((it) => label(it, my + rM + 14 + it.row * LH, it.x, my + rOf(it.b) + 2));
+    ch.G = { h, hits };
+  }
   function hover(ch, e) {
     const G = ch.G, cfg = ch.cfg;
     if (!G) return;
     const r = ch.cv.getBoundingClientRect();
     const x = e.clientX - r.left, y = e.clientY - r.top;
     let html = '';
-    if (cfg.type === 'strip') {
+    if (cfg.type === 'solar') {
+      let best = null, bd = Infinity;
+      G.hits.forEach((b) => { const d = Math.hypot(b.x - x, b.y - y) - b.r; if (d < bd) { bd = d; best = b; } });
+      if (!best || bd > 14) { const had = ch.hr !== -1; ch.hr = -1; ch.tip.hidden = true; if (had) draw(ch); return; }
+      if (best.i !== ch.hr) { ch.hr = best.i; draw(ch); }
+      html = best.tip;
+    } else if (cfg.type === 'strip') {
       const i = Math.floor((y - G.T + 5) / 30);
       if (i < 0 || i >= cfg.rows.length) { ch.hr = -1; ch.tip.hidden = true; draw(ch); return; }
       if (i !== ch.hr) { ch.hr = i; draw(ch); }
@@ -481,6 +587,11 @@
 #lab .lc-mini { border: 1px solid rgba(37,46,62,.8); border-radius: 10px; padding: 10px 12px 6px; display: grid; gap: 4px; min-width: 0; background: rgba(5,7,11,.22); }
 #lab .lc-mini h4 { margin: 0; font-size: 14px; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 #lab .lc-mini h4 span { font-weight: 500; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#lab .lc-sol { padding: 0 0 9px; overflow: hidden; }
+#lab .lc-sol p { padding: 0 12px; }
+#lab .lc-dest .lc-ob-v { display: flex; gap: 6px; justify-content: flex-end; align-items: baseline; }
+#lab .lc-dest .d { grid-column: 1 / -1; margin-top: -3px; padding-left: 18px; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+#lab .lc-dest .d span { white-space: nowrap; }
 #lab .lc-chart { position: relative; min-width: 0; }
 #lab .lc-chart canvas { display: block; width: 100%; touch-action: pan-y; }
 #lab .lc-tip { position: absolute; z-index: 3; pointer-events: none; background: rgba(9,12,18,.96); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 12px; line-height: 1.5; max-width: 260px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
@@ -1569,6 +1680,57 @@
       if (a.results.length > 12 && !res.moreOpen) host.insertAdjacentHTML('beforeend', `<button type="button" class="btn sm lc-more" data-more>모두 보기 (${a.results.length}개)</button>`);
       // data-more 버튼은 바로 앞 형제(표)를 펼칩니다
     },
+    // 사람들은 어느 행성으로 갔나 (요약이 있는 실험만). 아무도 떠나지 않았으면 결말 칸 끝에 한 줄만
+    settleSec(out, res, obSec) {
+      const { cfg, a } = res, X = Ex(cfg.modeId), st = a.settle;
+      if (!st || !st.N) return;
+      if (!st.leavers) {
+        if (cfg.q === 1) obSec.insertAdjacentHTML('beforeend', `<p class="lf-h">${esc(short(X.xfmt(a.x1)))}까지 지구를 떠난 세계는 없었습니다.</p>`);
+        return;
+      }
+      const dest = st.dest || [];
+      const yr = (v) => (fin(v) ? short(X.xfmt(Math.round(v))) : '—');
+      const ppl = (v) => (fin(v) ? WS.fmtCount(+v.toPrecision(2)) + ' 명' : '—').replace(/(\d) 명/, '$1명'); // 모형의 중앙값이라 두 자리만
+      // 첫머리: 몇 개 세계에서 떠났고, 첫 정착지는 어디가 가장 많았나
+      let lead = st.leavers === st.N ? `${st.N}개 세계 모두에서 사람들이 지구를 떠났습니다.` : `${st.N}개 세계 중 ${st.leavers}개에서 사람들이 지구를 떠났습니다.`;
+      const firsts = dest.filter((d) => d.firstShare > 0).sort((p, q) => q.firstShare - p.firstShare);
+      if (firsts.length) {
+        const tops = firsts.filter((d) => firsts[0].firstShare - d.firstShare < 1e-9), f0 = tops[0], nF = Math.round(f0.firstShare * st.leavers);
+        if (st.leavers === 1) lead += ` 그 세계의 첫 정착지는 ${esc(josa(f0.name, '이었', '였'))}습니다.`;
+        else if (f0.firstShare > 0.9999) lead += ` 첫 정착지는 모두 ${esc(josa(f0.name, '이었', '였'))}습니다.`;
+        else {
+          const who = tops.length === 1 ? josa(f0.name, '이', '가') : tops.length === 2 ? `${josa(f0.name, '과', '와')} ${josa(tops[1].name, '이', '가')}` : `${tops.slice(0, -1).map((d) => d.name).join(', ')}, ${josa(tops[tops.length - 1].name, '이', '가')}`;
+          lead += ` ${st.leavers < st.N ? '그 가운데 ' : ''}첫 정착지는 ${esc(who)} 가장 많았습니다 (떠난 ${st.leavers}개 세계 중 ${tops.length > 1 ? '각각 ' : ''}${nF}개).`;
+        }
+      }
+      const s = this.sec(out, '사람들은 어느 행성으로 갔나', lead, 'rocket');
+      const tipOf = (d) => this.tipRows(d.name, [[null, '정착지가 생긴 세계', `${pct(d.share)} (${d.reached}개)`], [null, '세운 해', yr(d.medianSince)], [null, '마지막 인구', ppl(d.medianPop)]].concat(d.firstShare > 0 ? [[null, '첫 정착지였던 세계', `${Math.round(d.firstShare * st.leavers)}개`]] : []));
+      // 그림: 태양계 표에 있는 천체만 (표에 없는 곳은 아래 목록에만)
+      const table = WS.SOLAR_BODIES || [], byId = new Map(dest.map((d) => [d.id, d]));
+      if (table.length && dest.some((d) => table.some((b) => b.id === d.id))) {
+        const bodies = table.map((b) => {
+          const d = byId.get(b.id);
+          return { id: b.id, name: b.name, a: b.a, parent: b.parent, home: !!b.home, share: d ? d.share : 0, tip: d ? tipOf(d) : b.home ? this.tipRows(b.name, [[null, '사람들이 출발한 곳', '']]) : this.tipRows(b.name, [[null, '이번 실험에서 정착지가 생긴 세계', '없음']]) };
+        });
+        const box = document.createElement('div');
+        box.className = 'lc-mini lc-sol';
+        s.appendChild(box);
+        makeChart(box, { type: 'solar', bodies, aria: `태양에서 가까운 순서로 놓은 그림. 정착지가 생긴 세계의 비율: ${dest.map((d) => `${d.name} ${pct(d.share)}`).join(', ')}` });
+        box.insertAdjacentHTML('beforeend', '<p class="lf-h">원이 클수록 그곳에 간 세계가 많습니다. 거리는 줄이고, 위성은 행성 아래에 그렸습니다.</p>');
+      }
+      // 목록: 모든 세계 중 그곳에 정착지가 생긴 세계의 비율, 많은 곳부터
+      const list = document.createElement('div');
+      list.className = 'lc-ob lc-dest';
+      list.innerHTML = dest.map((d) => `<div class="lc-ob-row"><div class="lc-ob-lab"><i style="background:${CA}"></i><span>${esc(d.name)}</span></div>
+        <div class="lc-ob-bars"><div class="lc-ob-bar" aria-label="${esc(d.name)} ${pct(d.share)}"><b style="width:${(d.share * 100).toFixed(1)}%;background:${CA}"></b></div></div><div class="lc-ob-v"><span>${pct(d.share)}</span><small>${d.reached}개</small></div>
+        <small class="d"><span>세운 해 ${esc(yr(d.medianSince))}</span> · <span>마지막 인구 ${esc(ppl(d.medianPop))}</span>${d.firstShare > 0 ? ` · <span>첫 정착지였던 세계 ${Math.round(d.firstShare * st.leavers)}개</span>` : ''}${d.lost ? ` · <span>${d.lost}개 세계에서는 뒤에 사라짐</span>` : ''}</small></div>`).join('');
+      s.appendChild(list);
+      const notes = dest.length ? ['막대는 모든 세계 중 그곳에 정착지가 생긴 세계의 비율입니다. 한 세계에 정착지가 여러 곳 생기므로 더하면 100%가 넘을 수 있습니다. 세운 해와 마지막 인구는 그 세계들의 중앙값입니다.'] : [];
+      if (st.allLost) notes.push(`정착지가 모두 사라진 세계: ${st.allLost}개.`);
+      if (st.homeEmpty) notes.push(`지구에는 아무도 남지 않고 다른 천체에만 사람이 남은 세계: ${st.homeEmpty}개.`);
+      if (st.star && st.star.length) notes.push(`다른 별로 우주선을 보낸 세계: ${st.star.reduce((n, o) => n + o.n, 0)}개 (${st.star.map((o) => `${esc(o.target)} ${o.n}개`).join(' · ')}).`);
+      s.insertAdjacentHTML('beforeend', `<p class="lf-h">${notes.join(' ')}</p><p class="lab-note">어느 천체를 고르는지는 거리·물·중력 같은 조건으로 정한 표현 모델입니다. 세계의 결말에는 영향을 주지 않습니다.</p>`);
+    },
 
     renderEnsemble(out, res) {
       const { cfg, a } = res, X = Ex(cfg.modeId), q = cfg.q;
@@ -1576,7 +1738,7 @@
       this.head(out, res);
       this.renderCards(out, (q === 2 ? a.cardsQ2 : a.cards) || a.cards || []);
       if (!a.outcomes || !a.N) { this.caveat(out); return; } // 계산을 마친 세계가 없음 → 카드만
-      const ob = () => { const s = this.sec(out, '결말은 어떻게 갈렸나', `마지막 상태에 따라 ${a.N}개 세계를 나눴습니다.${X.native ? '' : ' (이 단계의 결말 이름은 관측 화면의 종료 문구를 그대로 씁니다)'}`, 'chart'); this.outcomeBars(s, a.outcomes.filter((o) => o.n > 0 || !X.dynamic), false); };
+      const ob = () => { const s = this.sec(out, '결말은 어떻게 갈렸나', `마지막 상태에 따라 ${a.N}개 세계를 나눴습니다.${X.native ? '' : ' (이 단계의 결말 이름은 관측 화면의 종료 문구를 그대로 씁니다)'}`, 'chart'); this.outcomeBars(s, a.outcomes.filter((o) => o.n > 0 || !X.dynamic), false); this.settleSec(out, res, s); };
       const disp = () => {
         const s = this.sec(out, '세계들은 모일까, 흩어질까?', '같은 때에 세계 두 개씩 골라 지표들이 얼마나 다른지 잰 값(중앙값)입니다. 0이면 똑같고, 1이면 “의미 있게 다른” 정도입니다. 선이 올라가면 갈라지는 중, 내려가면 다시 모이는 중입니다.', 'branch');
         makeChart(s, {

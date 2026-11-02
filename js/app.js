@@ -42,6 +42,7 @@
     life: { h: (W) => (W < 520 ? (W - 16) / 2 + 54 : (W - 32) / 2 + 62), under: (W) => (W < 520 ? 34 : 42), zoom: 2 },
     stellar: { h: (W) => W + 60, under: () => 34, min: 300 },
     universe: { h: (W) => W + 60, under: () => 34, min: 300 },
+    solar: { h: (W) => W * 0.95, min: 300, reserve: 510 }, // 태양계 보기 (생명·문명 공통): 지도보다 넉넉한 모양. 범례가 길어 개입 버튼까지 보이려면 더 비켜 줘야 함
   };
   /* 해설·안내에서 숫자만 바뀌었는지 가려내는 틀 */
   const narTemplate = (t) => String(t).replace(/[+\-−]?\d[\d.,]*/g, '#');
@@ -318,7 +319,7 @@
   /* ---------- 첫 방문 안내 ---------- */
   const GUIDE = [
     { target: 'viewport', title: '이 화면이 바로 이 세계입니다',
-      text: (touch, narrow, canZoom) => `${narrow ? '해설 카드가 지금 무슨 일이 일어나는지 쉬운 말로 알려 주고, 범례를 펼치면 색깔의 뜻을 볼 수 있습니다.' : '왼쪽 위 해설 카드가 지금 무슨 일이 일어나는지 쉬운 말로 알려 주고, 왼쪽 아래 범례가 색깔의 뜻을 알려 줍니다.'} ${touch ? '지도를 누르면' : '지도 위에 마우스를 올리면'} 그곳의 자세한 정보가 보입니다.${narrow && canZoom ? ' "크게" 버튼을 누르면 지도를 키워 옆으로 밀어 볼 수 있습니다.' : ''}` },
+      text: (touch, narrow, canZoom, hasSpace) => `${narrow ? '해설 카드가 지금 무슨 일이 일어나는지 쉬운 말로 알려 주고, 범례를 펼치면 색깔의 뜻을 볼 수 있습니다.' : '왼쪽 위 해설 카드가 지금 무슨 일이 일어나는지 쉬운 말로 알려 주고, 왼쪽 아래 범례가 색깔의 뜻을 알려 줍니다.'} ${touch ? '지도를 누르면' : '지도 위에 마우스를 올리면'} 그곳의 자세한 정보가 보입니다.${narrow && canZoom ? ' "크게" 버튼을 누르면 지도를 키워 옆으로 밀어 볼 수 있습니다.' : ''}${hasSpace ? ' "태양계" 보기를 고르면 행성과 소행성 충돌을 우주에서 볼 수 있습니다.' : ''}` },
     { target: 'transport', title: '시간은 저절로 흐릅니다',
       text: (touch) => `재생 버튼으로 멈추거나 이어 가고, 속도 버튼으로 빠르기를 고르세요. 막대는 관측 기간이고, 그 위의 점은 이 세계에서 일어난 큰 사건입니다.${touch ? '' : ' 스페이스바로 멈추고, 숫자 1~5로 속도를 바꿀 수 있습니다.'}` },
     { target: 'controls', title: '가끔, 간접적으로만 개입할 수 있습니다',
@@ -331,6 +332,7 @@
     acc: 0, lastTs: 0, uiTimer: 0, uiTick: 0, lastEventId: 0, view: 0, tab: 'log',
     seed: WS.randomSeed(), W: 0, H: 0, dpr: 1, endShown: false,
     guideOpen: false, guideStep: 0, guideSeen: false, safe: { top: 0, bottom: 0 }, mapZoom: false, sparksFolded: false,
+    returnToSpace: false, insetOff: false, hoverEv: null,
 
     init() {
       this.canvas = $('view');
@@ -430,7 +432,7 @@
       const cv = this.canvas;
       cv.addEventListener('click', (e) => this.onClick(e));
       cv.addEventListener('mousemove', (e) => this.onMove(e));
-      cv.addEventListener('mouseleave', () => { $('tooltip').hidden = true; });
+      cv.addEventListener('mouseleave', () => { $('tooltip').hidden = true; this.hoverEv = null; cv.classList.remove('hot'); });
       // 탭 키로 버튼에 온 경우(키보드 사용자)와 마우스로 누른 뒤 포커스가 남은 경우를 구별합니다 (스페이스바 처리용).
       window.addEventListener('pointerdown', () => { this.kbNav = false; }, true);
       window.addEventListener('keydown', (e) => { if (e.key === 'Tab') this.kbNav = true; this.onKey(e); });
@@ -595,6 +597,7 @@
     startMode(id, opts, inherit, lab) {
       const m = WS.modes[id];
       if (!m) return;
+      const keepSpace = !!this.sim && this.modeId === id && this.inSpace(); // 같은 단계를 다시 시작하면 보던 태양계 보기에 남습니다.
       this.mode = m; this.modeId = id; this.opts = copyOpts(opts); this.inherit = inherit || null;
       this.labCtx = lab || null;
       this.sim = m.create(Object.assign({}, this.opts), this.seed, inherit || null);
@@ -604,6 +607,8 @@
         safe('LabCore.attachSchedule', () => WS.LabCore.attachSchedule(this.sim, this.labCtx.schedule.map((x) => Object.assign({}, x))));
       }
       this.paused = false; this.acc = 0; this.selected = null; this.lastEventId = 0; this.view = 0; this.endShown = false;
+      this.returnToSpace = false; this.insetOff = false; this.hoverEv = null;
+      this.canvas.classList.remove('aiming', 'hot');
       this.speed = 1;
       this.power = Math.max(this.power, 4);
       this.godMarks = []; this.statHist = []; this.statSig = ''; this.sparkSig = ''; this.legendSig = ''; this.narText = null; this.narTpl = null; this.narFadeAt = 0; this.eraName = null; this.eraTimeText = null;
@@ -639,6 +644,7 @@
       this.fitPhone();
       if ($('viewWrap').scrollLeft) $('viewWrap').scrollLeft = 0;
       this.resize();
+      if (keepSpace) this.setView(m.space.view);
       this.updateUI();
       // 좁은 화면은 창 전체가 스크롤되므로, 로비·실험실에서 내려가 있던 자리를 그대로 두면 지도가 화면 밖에 있습니다.
       // 실험실로 돌아갈 때의 자리는 실험실이 버튼 위치를 기준으로 되찾으므로 여기서 맨 위로 올려도 괜찮습니다.
@@ -689,8 +695,10 @@
       const views = this.mode.views || [];
       v.hidden = views.length < 2;
       if (views.length < 2) return;
-      v.insertAdjacentHTML('beforeend', '<span class="vl">지도</span>');
+      v.insertAdjacentHTML('beforeend', '<span class="vl">보기</span>');
+      const sp = this.mode.space;
       views.forEach((name, i) => {
+        if (sp && i === sp.view && !WS.SpaceView) return; // 태양계 그림 파일을 못 읽었으면 탭도 두지 않습니다.
         const b = document.createElement('button');
         b.type = 'button';
         b.textContent = name;
@@ -712,6 +720,7 @@
     syncZoomBtn() {
       const z = $('views').querySelector('[data-zoom]');
       if (!z) return;
+      z.hidden = this.inSpace(); // 태양계 보기는 옆으로 밀어 볼 지도가 아닙니다.
       z.textContent = this.mapZoom ? '작게' : '크게';
       z.setAttribute('aria-pressed', this.mapZoom ? 'true' : 'false');
       z.setAttribute('aria-label', this.mapZoom ? '지도 전체 보기' : '지도 크게 보기 (옆으로 밀어 봅니다)');
@@ -728,21 +737,41 @@
     /* 휴대폰: 캔버스를 그림 크기만큼만 잡아, 재생줄과 개입 버튼이 첫 화면에 들어오게 합니다. 그 밖의 화면에서는 CSS 그대로 둡니다. */
     fitPhone() {
       const vp = $('viewport');
-      const f = window.innerWidth <= PHONE_W ? MAP_FIT[this.modeId] : null;
+      const f = window.innerWidth <= PHONE_W ? this.mapFit() : null;
       if (!f) { ['--view-w', '--view-h', '--view-under'].forEach((k) => vp.style.removeProperty(k)); return; }
       const W0 = vp.clientWidth || window.innerWidth;
       const W = this.mapZoom && f.zoom ? Math.round(W0 * f.zoom) : W0;
       let h = f.h(W);
       // 둥근 그림(우주·항성계)은 낮은 화면에서 줄여 재생줄 아래 개입 버튼까지 보이게 합니다 (머리줄·해설·보기·범례·재생줄 약 350px + 개입줄 일부 80px).
-      if (f.min) h = WS.clamp(h, f.min, Math.max(f.min, window.innerHeight - 430));
+      if (f.min) h = WS.clamp(h, f.min, Math.max(f.min, window.innerHeight - (f.reserve || 430)));
       vp.style.setProperty('--view-w', W === W0 ? '100%' : W + 'px');
       vp.style.setProperty('--view-h', Math.round(h) + 'px');
       vp.style.setProperty('--view-under', (f.under ? f.under(W) : 0) + 'px');
     },
+    /* 지금 태양계 보기인지. 모드의 render와 pick은 지도만 알고, 태양계 번호는 여기서만 가려냅니다. */
+    inSpace() {
+      const sp = this.mode && this.mode.space;
+      return !!sp && this.view === sp.view;
+    },
+    mapFit() { return this.inSpace() ? MAP_FIT.solar : MAP_FIT[this.modeId]; },
     setView(i) {
+      const sp = this.mode && this.mode.space, on = !!sp && i === sp.view;
+      if (on && !WS.SpaceView) return;
+      if (on && this.selected) { this.returnToSpace = false; this.select(null); } // 위치 고르기는 지도에서만 합니다.
+      const was = this.inSpace();
       this.view = i;
       [...$('views').querySelectorAll('button[data-i]')].forEach((c) => c.setAttribute('aria-pressed', +c.dataset.i === i ? 'true' : 'false'));
+      $('tooltip').hidden = true;
+      this.canvas.classList.remove('hot');
+      if (on !== was) {
+        if (on) this.mapZoom = false;
+        this.syncZoomBtn();
+        this.fitPhone();
+        this.resize();
+        if (on && $('viewWrap').scrollLeft) $('viewWrap').scrollLeft = 0;
+      }
       this.renderLegend(true);
+      this.measureSafe();
     },
     syncTime() {
       const ended = !!(this.sim && this.sim.ended);
@@ -823,6 +852,8 @@
       this.select(this.selected === iv ? null : iv);
     },
     select(iv) {
+      // 태양계 보기에서는 위치를 고를 수 없으므로 지도로 잠시 옮겼다가, 적용하거나 취소하면 돌아옵니다.
+      if (iv && this.inSpace()) { this.returnToSpace = true; this.setView(0); }
       this.selected = iv;
       [...$('acts').children].forEach((b) => b.setAttribute('aria-pressed', b._iv === iv ? 'true' : 'false'));
       this.canvas.classList.toggle('aiming', !!iv);
@@ -835,6 +866,9 @@
         // 좁은 화면에서 안내는 지도 맨 위에 뜹니다. 개입 버튼을 누르려고 내려와 있었다면 안내와 지도가 보이게 올립니다.
         const top = h.getBoundingClientRect().top;
         if (top < 8) window.scrollBy(0, top - 8);
+      } else if (this.returnToSpace) {
+        this.returnToSpace = false;
+        if (this.sim && this.mode.space) this.setView(this.mode.space.view);
       }
     },
     applyAct(iv, w) {
@@ -880,10 +914,27 @@
       const r = this.canvas.getBoundingClientRect();
       return [e.clientX - r.left, e.clientY - r.top];
     },
+    /* 태양계 그림이 알려 주는 누를 곳. 지도 보기에서는 충돌 장면 창(inset)만 뜻이 있습니다. */
+    spaceHit(x, y) {
+      const SV = WS.SpaceView;
+      if (!SV || !this.mode.space) return null;
+      if (this.selected && !this.inSpace()) return null; // 조준 중에는 창 아래의 지도 칸을 고를 수 있어야 합니다.
+      const h = safe('space.hit', () => SV.hit(this.sim, this.mode, x, y, this.W, this.H, this), null) || null;
+      return !this.inSpace() && h && h.kind !== 'inset' ? null : h;
+    },
     onClick(e) {
       if (!this.sim) return;
       const [x, y] = this.canvasXY(e);
+      const SV = WS.SpaceView, hit = this.spaceHit(x, y);
+      if (this.inSpace()) {
+        if (hit && hit.kind === 'replay') safe('space.replay', () => SV.replay(this.sim));
+        else if (hit && hit.kind === 'skip') safe('space.skip', () => SV.skip(this.sim));
+        this.onMove(e);
+        return;
+      }
+      if (hit) { this.setView(this.mode.space.view); return; }
       const w = this.mode.pick ? safe('pick', () => this.mode.pick(this.sim, x, y, this.W, this.H), null) : null;
+      if (w && w.goView != null) { this.setView(w.goView); return; } // 지도 위 안내 표(문명의 정착민 표시)를 누른 것: 개입도 조사도 아닙니다.
       if (this.selected) {
         if (w) this.applyAct(this.selected, w);
         return;
@@ -893,10 +944,19 @@
     },
     onMove(e) {
       const tt = $('tooltip');
-      if (!this.sim || !this.mode.inspect) { tt.hidden = true; return; }
+      if (!this.sim) { tt.hidden = true; return; }
+      if (!isTouch()) this.hoverEv = e;
       const [x, y] = this.canvasXY(e);
-      const w = this.mode.pick ? safe('pick', () => this.mode.pick(this.sim, x, y, this.W, this.H), null) : null;
-      const lines = w ? safe('inspect', () => this.mode.inspect(this.sim, w), null) : null;
+      const m = this.mode, sp = m.space, hit = this.spaceHit(x, y);
+      let lines = null, hot = !!hit;
+      if (this.inSpace()) {
+        if (hit && hit.kind === 'body' && sp.inspect) lines = safe('space.inspect', () => sp.inspect(this.sim, hit.id), null);
+      } else if (!hit) {
+        const w = m.pick ? safe('pick', () => m.pick(this.sim, x, y, this.W, this.H), null) : null;
+        if (w && w.goView != null) hot = true;
+        if (w && m.inspect) lines = safe('inspect', () => m.inspect(this.sim, w), null);
+      }
+      this.canvas.classList.toggle('hot', hot);
       if (!lines || !lines.length) { tt.hidden = true; return; }
       tt.innerHTML = lines.map((l, i) => (i === 0 ? `<b>${esc(l)}</b>` : esc(l))).join('<br>');
       tt.hidden = false;
@@ -944,8 +1004,14 @@
       if (!w || !h) return;
       this.dpr = Math.min(2, window.devicePixelRatio || 1);
       this.W = w; this.H = h;
-      this.canvas.width = Math.round(w * this.dpr);
-      this.canvas.height = Math.round(h * this.dpr);
+      // 크기가 그대로면 캔버스를 비우지 않고, 바뀌었으면 바로 다시 그립니다. ResizeObserver는 그리기 뒤에 불려서 그냥 두면 한 프레임 검게 깜빡입니다.
+      const cw = Math.round(w * this.dpr), ch = Math.round(h * this.dpr);
+      if (this.canvas.width === cw && this.canvas.height === ch) return;
+      this.canvas.width = cw;
+      this.canvas.height = ch;
+      if (!this.sim || !this.lastTs) return;
+      this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      safe('repaint', () => this.paint(this.sim, this.mode, this.ctx, this.lastTs / 1000));
     },
     frame(ts) {
       requestAnimationFrame(this.frame);
@@ -973,9 +1039,38 @@
       if (sim.fx.length) sim.fx = sim.fx.filter((f) => f.life > 0);
       const ctx = this.ctx;
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      m.render(sim, ctx, this.W, this.H, ts / 1000, this);
+      this.paint(sim, m, ctx, ts / 1000);
       this.uiTimer -= dt;
       if (this.uiTimer <= 0) { this.uiTimer = 0.25; this.updateUI(); }
+    },
+    /* 한 장면을 그립니다. 태양계 그림이 없거나 도중에 실패해도 지도를 그려 화면이 검게 남지 않습니다. */
+    paint(sim, m, ctx, t) {
+      const sp = m.space, SV = WS.SpaceView, W = this.W, H = this.H;
+      if (sp && this.view === sp.view) {
+        if (SV) {
+          if (sp.before) safe('space.before', () => sp.before(sim, this));
+          if (safe('space', () => { SV.frame(ctx, W, H, t, sim, m, this); return true; }, false)) return;
+          this.wipeCanvas(ctx);
+        }
+        this.view = 0; // 모드의 render는 지도 번호만 압니다.
+        try { m.render(sim, ctx, W, H, t, this); } finally { this.view = sp.view; }
+        return;
+      }
+      m.render(sim, ctx, W, H, t, this);
+      if (!sp || !SV || this.insetOff) return;
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      if (safe('inset', () => { SV.inset(ctx, W, H, t, sim, m, this); return true; }, false)) return;
+      this.insetOff = true;
+      this.wipeCanvas(ctx);
+      m.render(sim, ctx, W, H, t, this);
+    },
+    /* 실패한 그림이 남긴 잘라내기·변환까지 모두 지웁니다. */
+    wipeCanvas(ctx) {
+      if (ctx.reset) ctx.reset();
+      else this.canvas.width = this.canvas.width;
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     },
     trackRate(ts) {
       const x = this.clock();
@@ -1100,6 +1195,8 @@
         nb.onclick = () => { this.seed = (this.seed * 7 + 13) >>> 0; this.startMode(nx.mode, nx.opts || {}, nx.inherit || null, null); };
       }
       if (sim.ended && !this.endShown) { this.showEnd(); this.syncTime(); }
+      // 행성은 마우스가 가만히 있어도 움직이고 충돌 장면 창은 저절로 닫히므로, 툴팁과 손가락 모양을 다시 맞춥니다.
+      if (this.hoverEv && (this.inSpace() || this.canvas.classList.contains('hot'))) this.onMove(this.hoverEv);
     },
     /* 모드가 지도를 그릴 때 참고할 수 있는 여백(선택): 캔버스 위·아래 가장자리를 해설 카드·범례가 덮는 높이(CSS px).
        좁은 화면에서는 안내층이 캔버스 밖에 있으므로 0입니다. render(sim, ctx, W, H, t, app)에서 app.safe로 읽습니다. */
@@ -1111,9 +1208,19 @@
         if (r.bottom <= cr.top || r.top >= cr.bottom || r.right <= cr.left || r.left >= cr.right) return 0;
         return edge === 'top' ? Math.max(0, r.bottom - cr.top) : Math.max(0, cr.bottom - r.top);
       };
+      // 낮은 휴대폰에서는 화면 아래에 걸린 재생줄이 태양계 그림의 아래쪽을 덮습니다. 스크롤해도 그림이 들썩이지 않게 맨 위 자리를 기준으로 비킵니다.
+      const stuck = this.inSpace() && window.innerWidth <= PHONE_W ? Math.min(this.H * 0.35, cr.bottom + window.scrollY - (window.innerHeight - $('transport').offsetHeight)) : 0;
+      // 태양계 그림의 글자가 피해 갈 자리 (캔버스 좌표)
+      const box = (el) => {
+        if (!el || el.hidden || !el.offsetParent) return null;
+        const r = el.getBoundingClientRect();
+        if (r.bottom <= cr.top || r.top >= cr.bottom || r.right <= cr.left || r.left >= cr.right || !r.width) return null;
+        return { x: r.left - cr.left, y: r.top - cr.top, w: r.width, h: r.height };
+      };
       this.safe = {
         top: Math.round(Math.max(cover($('narrator'), 'top'), cover($('views'), 'top'))),
-        bottom: Math.round(cover($('legendBox'), 'bottom')),
+        bottom: Math.round(Math.max(cover($('legendBox'), 'bottom'), stuck)),
+        hud: [box($('narrator')), box($('views')), box($('legendBox'))].filter(Boolean),
       };
     },
     /* 해설 카드의 시각: '행성 나이 30.8억 년 · 오늘로부터 14.9억 년 전'처럼 긴 표기는 앞부분(주 시각)과 뒷부분(보조 설명)으로 나눠,
@@ -1579,9 +1686,9 @@
       const g = GUIDE[this.guideStep];
       $('guideStep').textContent = `안내 ${this.guideStep + 1} / ${GUIDE.length}`;
       $('guideTitle').textContent = g.title;
-      const vp = $('viewport'), fit = MAP_FIT[this.modeId];
+      const vp = $('viewport'), fit = this.mapFit();
       const narrow = window.innerWidth <= PHONE_W || (!!vp && vp.clientWidth <= PHONE_W);
-      $('guideText').textContent = g.text(isTouch(), narrow, !!(fit && fit.zoom));
+      $('guideText').textContent = g.text(isTouch(), narrow, !!(fit && fit.zoom), !!(this.mode.space && WS.SpaceView));
       $('guidePrev').hidden = this.guideStep === 0;
       $('guideNext').textContent = this.guideStep === GUIDE.length - 1 ? '관측 시작' : '다음';
       [...$('guideDots').children].forEach((d, k) => d.classList.toggle('on', k === this.guideStep));

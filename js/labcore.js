@@ -110,6 +110,8 @@
     // 이 모드의 우연이 세계 상태(예: 정확한 인구 수)에 매 순간 섞이면, 개입 뒤의 우연은 언제나 함께 바뀝니다
     E.chanceCoupled = !!(x && x.chanceCoupled === true);
     E.iv = (id) => (mode.interventions || []).find((iv) => iv.id === id) || null;
+    // 세계마다 모드가 따로 주는 요약 (결과의 extra로 들어감, 지표·결말 계산에는 쓰지 않음)
+    E.extra = x && typeof x.extra === 'function' ? x.extra : null;
     // 결말 정보 (동적 범주는 결과에서 만들어짐)
     E.outcomeInfo = (key, i) => {
       const o = E.outcomes.find((q) => q.key === key);
@@ -214,12 +216,15 @@
   }
 
   const KIND_RANK = { end: 4, god: 3, milestone: 2, disaster: 1 };
-  /* 연대기 요약 (≤ 40개): 숫자만 다른 같은 종류의 일이 연달아 나오면 하나로 묶고("… 외 비슷한 일 n번"),
-     그래도 많으면 끝·개입·이정표를 모두 남기고 재난은 시간에 고르게 골라 남깁니다. */
+  /* 연대기 요약 (≤ 40개, 정착지 줄은 따로): 숫자만 다른 같은 종류의 일이 연달아 나오면 하나로 묶고("… 외 비슷한 일 n번"),
+     그래도 많으면 끝·개입·이정표를 모두 남기고 재난은 시간에 고르게 골라 남깁니다.
+     정착지 줄(soft)은 어느 천체로 갔는지 보여 주는 표현 모형의 기록이라 묶기와 줄 수 계산에서 빼고 그대로 덧붙입니다. 재난 줄을 밀어내지 않습니다. */
   function chronicle(sim) {
     const ev = (sim.events || []).filter((e) => KIND_RANK[e.kind]);
+    const soft = ev.filter((e) => e.soft).map((e) => ({ e, key: '', n: 1 }));
     const merged = [];
     for (const e of ev) {
+      if (e.soft) continue;
       const key = e.kind + '|' + String(e.text).replace(/[0-9][0-9.,]*/g, '#');
       const last = merged[merged.length - 1];
       if (last && last.key === key && e.kind === 'disaster') { last.n++; continue; }
@@ -234,7 +239,7 @@
       for (let i = 0; i < room && dis.length; i++) chosen.push(dis[Math.floor(((i + 0.5) * dis.length) / room)]);
       pick = keep.slice(-40).concat(chosen).sort((a, b) => a.e.id - b.e.id);
     }
-    return pick.map(({ e, n }) => ({ time: e.time, v: fin(e.v) ? e.v : null, text: String(e.text).replace(/\s—\s*$/, '') + (n > 1 ? ` (이후 비슷한 일 ${n - 1}번 더)` : ''), kind: e.kind }));
+    return pick.concat(soft).sort((a, b) => a.e.id - b.e.id).map(({ e, n }) => ({ time: e.time, v: fin(e.v) ? e.v : null, text: String(e.text).replace(/\s—\s*$/, '') + (n > 1 ? ` (이후 비슷한 일 ${n - 1}번 더)` : ''), kind: e.kind }));
   }
 
   class Runner {
@@ -289,11 +294,15 @@
       for (const id in sim.reached) { const r = sim.reached[id]; if (r && fin(r.v)) reached[id] = r.v; }
       const series = {};
       E.metrics.forEach((m, i) => { series[m.key] = this.series[i]; });
+      // 모드의 요약은 실패해도 결과를 버리지 않습니다. 워커로 넘길 수 있고 세계를 붙잡지 않도록 순수 자료로 복사
+      let extra = null;
+      if (E.extra) { try { const x = E.extra(sim); if (x) extra = JSON.parse(JSON.stringify(x)); } catch (e) { extra = null; } }
       return {
         seed: seed >>> 0, xs: this.xs, series, reached, outcome: String(outcome), endX: fin(endX) ? endX : null, ended,
         early: ended && fin(endX) && endX < this.xs[this.xs.length - 1] - 1e-9 * Math.abs(this.xs[this.xs.length - 1]),
         capped: this.stopped && !ended, chronicle: chronicle(sim), ivMsgs: this.ivMsgs, steps: sim.steps, ms: Math.round(ms), pre: this.pre,
         godActs: sim.godActs || 0,
+        ...(extra ? { extra } : null),
       };
     }
   }
@@ -1059,7 +1068,47 @@
     out.results = rs;
     const above = N >= 5 ? curveBoot(N, pairs, (i, j, k) => pairDist(rs[i]._U, rs[j]._U, k, scales)) : null;
     Object.assign(out, verdictEnsemble(E, out, ctx, above));
+    const settle = settleStats(rs);
+    if (settle) out.settle = settle;
     return out;
+  }
+
+  /* 사람들은 어디로 갔나: 세계마다 모드가 준 요약 r.extra = { first, list: [{ id, name, pop, since, lost }], star, homeEmpty }를 모읍니다.
+     leavers = 사람들이 고향 행성을 떠난 세계 수. reached = 그 천체에 정착지가 생긴 적 있는 세계 수 (뒤에 사라졌어도 포함, 사라진 수는 lost에 따로)
+     share = reached / 모든 세계, firstShare = 그곳이 첫 정착지였던 세계 / 떠난 세계
+     medianSince, medianPop = 그곳에 정착지가 생긴 세계들의 중앙값 (사라진 곳의 마지막 인구는 0명). 요약이 있는 결과가 없으면 null */
+  function settleStats(rs) {
+    const all = rs.map((r) => r.extra).filter((x) => x && Array.isArray(x.list));
+    if (!all.length) return null;
+    const gone = (d) => d.lost !== false && d.lost != null;
+    const by = new Map(), stars = new Map();
+    let leavers = 0, homeEmpty = 0, allLost = 0;
+    for (const x of all) {
+      if (x.homeEmpty) homeEmpty++;
+      if (x.star && x.star.target) stars.set(x.star.target, (stars.get(x.star.target) || 0) + 1);
+      if (!x.list.length && !x.star) continue;
+      leavers++;
+      if (!x.list.length) continue;
+      if (x.list.every(gone)) allLost++;
+      const fid = x.first && x.first.id ? x.first.id : x.first;
+      const first = x.list.find((d) => d.id === fid || d.name === fid) || x.list.reduce((b, d) => (d.since < b.since ? d : b));
+      for (const d of x.list) {
+        if (!by.has(d.id)) by.set(d.id, { id: d.id, name: d.name, reached: 0, lost: 0, firstN: 0, since: [], pop: [] });
+        const o = by.get(d.id);
+        o.reached++;
+        if (gone(d)) o.lost++;
+        if (d === first) o.firstN++;
+        o.since.push(d.since);
+        o.pop.push(gone(d) ? 0 : d.pop);
+      }
+    }
+    const N = rs.length;
+    const dest = [...by.values()].map((o) => ({
+      id: o.id, name: o.name, reached: o.reached, share: o.reached / N, medianSince: median(o.since), medianPop: median(o.pop),
+      firstShare: leavers ? o.firstN / leavers : 0, lost: o.lost,
+    })).sort((p, q) => q.reached - p.reached || q.firstShare - p.firstShare || p.medianSince - q.medianSince);
+    const star = [...stars].map(([target, n]) => ({ target, n })).sort((p, q) => q.n - p.n);
+    return { leavers, N, dest, homeEmpty, allLost, star };
   }
 
   // 세계 n개(또는 쌍 n개)로 대략 알아볼 수 있는 결말 비율 차이, %p (두 비율 비교, 검정력 80%, 비율 50% 가정, 5 단위)

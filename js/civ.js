@@ -121,6 +121,74 @@
   const OUT = {};
   OUTCOMES.forEach((o) => { OUT[o.key] = o; });
 
+  /* 지구 밖 정착지: 어느 천체로 가는지는 세계의 결말에 영향을 주지 않는 표현 모형입니다. 동역학에는 offworld만 쓰이고, 이 기록은 화면·범례·실험실만 읽습니다.
+     gate = 지구 밖 인구 문턱, lag = 첫 정착지 뒤로 지나야 하는 햇수 [최소, 최대], w = 인구 몫, fs = 첫 정착지가 될 점수, why = 짧은 이유, first/next = 연대기 문장 */
+  const SETTLE = [
+    { id: 'moon', gate: 150, lag: [0, 5], w: 0.22, fs: 0.7, why: '가깝고 극지방에 얼음이 있음', first: '달에 첫 정착지가 세워졌습니다. 가깝고 극지방에 얼음이 있는 곳입니다.', next: '달에 정착지가 생겼습니다. 가까운 데다 극지방에 얼음이 있습니다.' },
+    { id: 'mars', gate: 150, lag: [0, 15], w: 1, fs: 1, why: '물, 지구와 비슷한 하루 길이, 옅은 대기', first: '화성에 첫 정착지가 세워졌습니다. 물과 옅은 대기가 있는 곳입니다.', next: '화성에 정착지가 생겼습니다. 물과 옅은 대기가 있고 하루 길이도 지구와 비슷합니다.' },
+    { id: 'ceres', gate: 3e3, lag: [8, 26], w: 0.32, fs: 0.12, why: '얼음과 광물', first: '소행성대의 세레스에 첫 정착지가 세워졌습니다. 얼음과 광물을 캘 수 있는 곳입니다.', next: '세레스에 정착지가 생겼습니다. 소행성대의 얼음과 광물을 캡니다.' },
+    { id: 'venus', gate: 3e4, lag: [14, 40], w: 0.2, fs: 0.08, why: '지구와 비슷한 중력, 고도 50 km의 기압', first: '금성의 구름 위에 첫 도시가 세워졌습니다. 고도 50 km는 기압과 중력이 지구와 비슷합니다.', next: '금성의 구름 위에 떠 있는 도시가 생겼습니다. 고도 50 km는 기압과 중력이 지구와 비슷합니다.' },
+    { id: 'mercury', gate: 5e4, lag: [18, 48], w: 0.08, fs: 0, why: '강한 햇빛과 금속', next: '수성에 정착지가 생겼습니다. 강한 햇빛으로 전기를 만들고 금속을 캡니다.' },
+    { id: 'ganymede', gate: 2e5, lag: [28, 58], w: 0.25, fs: 0, why: '방사선을 막아 주는 자기장, 두꺼운 얼음', next: '목성의 위성 가니메데에 정착지가 생겼습니다. 자기장이 방사선을 막아 주고 얼음이 두껍습니다.' },
+    { id: 'europa', gate: 5e5, lag: [34, 72], w: 0.14, fs: 0, why: '얼음 밑의 바다', next: '목성의 위성 유로파에 정착지가 생겼습니다. 두꺼운 얼음 밑에 바다가 있습니다.' },
+    { id: 'titan', gate: 1e6, lag: [42, 88], w: 0.3, fs: 0, why: '두꺼운 대기와 메탄', next: '토성의 위성 타이탄에 정착지가 생겼습니다. 대기가 두껍고 연료가 되는 메탄이 흔합니다.' },
+    { id: 'triton', gate: 2e7, lag: [70, 125], w: 0.05, fs: 0, why: '태양계 끝의 전초 기지', next: '해왕성의 위성 트리톤에 정착지가 생겼습니다. 사람이 사는 곳 가운데 태양에서 가장 먼 곳입니다.' },
+  ];
+  const STAR_TARGETS = [['프록시마 센타우리 b', 4.2, 5], ['바너드별', 6, 3], ['타우 세티 e', 11.9, 2], ['글리제 667C c', 23.6, 1], ['TRAPPIST-1 e', 40.7, 1]];
+  // 다른 항성계의 천체: 이름 뒤에 조사를 붙이지 않음 ('WS-1234 b'처럼 로마자로 끝날 수 있음)
+  const OTHER_WHY = {
+    near: ['가까워서 오가기 쉬움', '가까워서 오가기 쉽습니다.'], moon: ['거대 행성 곁의 얼음과 자원', '거대 행성 곁에서 얼음과 자원을 얻습니다.'],
+    ocean: ['물이 있음', '물이 있어 살아가기 좋습니다.'], ice: ['얼음에서 얻는 물과 연료', '얼음에서 물과 연료를 얻습니다.'], rock: ['단단한 땅과 광물', '단단한 땅과 광물이 있습니다.'],
+  };
+  /* 세계마다 한 번: 갈 곳과 문턱·몫을 전용 생성기로 정해 둡니다 (주 난수는 쓰지 않음). 이후에는 난수를 쓰지 않습니다 */
+  function makeSettle(s, inherit) {
+    const g = new WS.RNG((s.seed ^ 0x51ed270b) >>> 0 || 11);
+    const ln = (sig) => Math.exp(sig * WS.clamp(g.normal(), -2.5, 2.5));
+    const inh = inherit || {};
+    const system = s.alien && inh.system && inh.system.planets && inh.system.planets.length ? inh.system : null;
+    const planet = s.alien ? inh.planet || '' : '지구';
+    const earth = !system && planet.includes('지구'); // 다른 종의 문명이라도 태양계라면 표의 사실이 그대로 맞음
+    const homeName = earth ? '지구' : system ? system.home : planet || null;
+    const sys = WS.systemBodies(system, { moon: s.alien ? inh.moon : true, giant: s.alien ? inh.giant : true, homeName });
+    const byId = new Map(sys.bodies.map((b) => [b.id, b]));
+    const home = sys.bodies.find((b) => b.home);
+    const dest = [];
+    if (earth || !system) {
+      for (const d of SETTLE) {
+        const b = byId.get(d.id);
+        if (b) dest.push(earth ? Object.assign({}, d, { bodyId: b.id, name: b.name }) : otherDest(d, b, home));
+      }
+    } else {
+      // 다른 항성계: 고향에서 궤도가 가까운 순서로, 문턱은 같은 순위의 값을 씀 (거대 행성에는 내릴 수 없음)
+      const ax = (b) => (b.parent ? byId.get(b.parent).a : b.a);
+      const cand = sys.bodies.filter((b) => !b.home && (b.parent || !b.giant)).sort((p, q) => Math.abs(ax(p) - home.a) - Math.abs(ax(q) - home.a));
+      cand.slice(0, SETTLE.length).forEach((b, i) => dest.push(otherDest(SETTLE[i], b, home)));
+    }
+    // 갈 곳이 하나도 없으면 고향 행성의 궤도에 도시를 띄움
+    if (!dest.length) dest.push({ id: 'orbit', bodyId: home.id, name: '궤도 도시', gate: 150, lag: [0, 0], w: 1, fs: 1, why: '갈 만한 천체가 없어 궤도에 띄운 거대한 도시', first: '행성 궤도에 첫 도시가 떠올랐습니다. 이 항성계에는 내려설 만한 천체가 없습니다.' });
+    const gates = {}, weights = {}, lags = {};
+    let firstId = null, best = -1;
+    for (const d of dest) {
+      gates[d.id] = d.gate * ln(0.8);
+      weights[d.id] = d.w * ln(0.5);
+      lags[d.id] = g.range(d.lag[0], d.lag[1]);
+      const sc = d.fs * ln(0.6);
+      if (sc > best) { best = sc; firstId = d.id; }
+    }
+    const pickStar = (() => {
+      if (s.alien && !earth) return { target: '이웃 별 ' + WS.makeName(g), ly: g.range(4, 30) };
+      const t = g.weighted(STAR_TARGETS, (q) => q[2]);
+      return { target: t[0], ly: t[1] };
+    })();
+    pickStar.speedC = g.range(0.05, 0.2);
+    return { list: [], dest, gates, weights, lags, firstId: null, plannedFirst: firstId, starPick: pickStar, star: null, allLost: false, sys, homeId: home.id, out: earth ? '지구 밖' : '행성 밖' };
+  }
+  function otherDest(d, b, home) {
+    const key = b.parent ? (b.parent === home.id ? 'near' : 'moon') : b.look === 'ocean' ? 'ocean' : b.look === 'ice' ? 'ice' : 'rock';
+    const w = OTHER_WHY[key];
+    return { id: b.id, bodyId: b.id, name: b.name, gate: d.gate, lag: d.lag, w: d.w, fs: d.fs, why: w[0], first: `${b.name}에 첫 정착지가 세워졌습니다. ${w[1]}`, next: `${b.name}에 정착지가 생겼습니다. ${w[1]}` };
+  }
+
   /* 격자 이웃표 (지도마다 한 번) */
   function prepMap(M) {
     if (M._nb) return;
@@ -229,6 +297,8 @@
       this.tipRate = 0; this.tipLeft = 0; this.slr = 0; this.tips = {};
       this.agiOutcome = null; this.agiYear = NaN; this.offworld = 0;
       this.firstTech = {};
+      this.impacts = []; this.impactN = 0; // 운석 기록 (태양계 뷰가 읽음)
+      this.settle = makeSettle(this, inherit);
       this.worldPop = 0; this.earthPop = 0; this.popPeak = 0; this.popPeakYear = this.year; this.crashRef = 0;
       this.lastNuke = -1e9; this.nukeWars = 0; this.pandemics = 0; this.famineY = 0;
       this.catLoss = 0; // 최근 재앙(전쟁·기근·대유행병·초지능)으로 죽은 사람 수 (해마다 2%씩 잊힘)
@@ -242,6 +312,7 @@
       this.popPeak = this.worldPop; this.crashRef = this.worldPop;
       this.coop = WS.clamp(this.coopTarget(), 0, 1);
       this.initClimate();
+      this.T0 = this.Tanom(); // 시작할 때의 기온 (행성 그림의 얼음 경계 기준, 동역학에는 쓰지 않음)
       this.updateDamage(true);
       this.maxTechEver = this.techNow();
       // 해설용 인구 증가율의 처음 값 (동역학에는 쓰지 않음): 근대 나라들의 증가율을 인구로 평균
@@ -903,7 +974,7 @@
         ai: `${who}에서 스스로 배우는 기계, 인공지능이 등장했습니다.`,
         gene: `${josa(who, '이', '가')} 유전자를 마음대로 고치는 기술을 얻었습니다. 병을 고칠 수도, 무기를 만들 수도 있습니다.`,
         fusion: `${josa(who, '이', '가')} 별의 불꽃, 핵융합 발전에 성공했습니다. 깨끗한 에너지가 넘쳐납니다.`,
-        mars: `${josa(who, '이', '가')} 다른 행성에 영구 정착지를 세웠습니다.`,
+        mars: `${josa(who, '이', '가')} ${this.settle.out}에 영구 정착지를 세웠습니다.`,
         agi: `${who}에서 인간을 넘어서는 초지능이 깨어났습니다.`,
         star: `${who}의 우주선이 다른 별을 향해 떠났습니다.`,
       }[id] || `${who}: ${josa(t[1], '을', '를')} 처음 손에 넣었습니다.`;
@@ -1508,12 +1579,44 @@
         this.offworld = Math.max(0, this.offworld + (this.offworld * nat * (1 - this.offworld / capW) + support * 300 * (this.agiOutcome === 'aligned' ? 3 : 1)) * dt);
         if (this.offworld < 10) this.offworld = 0;
       }
+      this.settleStep();
       this.crashRef = Math.max(this.crashRef * Math.exp(-0.004 * dt), this.worldPop);
       this.catLoss *= Math.exp(-0.02 * dt);
       // 최근 인구 증가율 (해설용, 동역학에는 쓰지 않음)
       const gNow = this._lastPop > 0 && this.worldPop > 0 ? Math.log(this.worldPop / this._lastPop) / dt : 0;
       this.popRate = this.popRate === undefined ? gNow : this.popRate + (gNow - this.popRate) * Math.min(1, 0.25 * dt);
       this._lastPop = this.worldPop;
+    }
+    /* 정착지 기록: 지구 밖 인구를 읽기만 하고 동역학에는 되먹이지 않습니다. 각 천체의 인구는 지금 상태만으로 다시 계산하므로 합이 늘 offworld와 같습니다 */
+    settleStep() {
+      const S = this.settle, y = this.year, off = this.offworld;
+      if (this.firstTech.star && !S.star) {
+        const t = S.starPick;
+        S.star = { target: t.target, ly: t.ly, year: y, speedC: t.speedC, arrive: y + t.ly / t.speedC };
+        this.log(`우주선의 목적지는 ${t.target}입니다. ${WS.trimNum(t.ly)}광년 떨어져 있어 약 ${Math.round(t.ly / t.speedC).toLocaleString('ko-KR')}년 뒤에 닿습니다.`, 'milestone').soft = true;
+      }
+      if (!this.firstTech.mars || S.allLost) return;
+      if (off <= 0) {
+        if (!S.list.length) return;
+        S.allLost = true;
+        for (const e of S.list) { e.lost = y; e.pop = 0; }
+        this.log(`${S.out} 정착지가 모두 사라졌습니다.`, 'milestone').soft = true;
+        return;
+      }
+      if (!S.list.length) this.settleFound(S.dest.find((d) => d.id === S.plannedFirst), true);
+      const div = this.agiOutcome === 'aligned' ? 3 : 1, y0 = S.list[0].since;
+      if (S.list.length < S.dest.length) for (const d of S.dest) {
+        if (off >= S.gates[d.id] / div && y - y0 >= S.lags[d.id] && !S.list.some((e) => e.id === d.id)) this.settleFound(d, false);
+      }
+      let tot = 0;
+      for (const e of S.list) { e.w = S.weights[e.id] * (1 - Math.exp(-(y - e.since + 1) / 40)); tot += e.w; } // +1: 세운 해에도 몫이 0이 되지 않게
+      for (const e of S.list) e.pop = (off * e.w) / tot;
+    }
+    settleFound(d, first) {
+      const S = this.settle;
+      if (first) S.firstId = d.id;
+      S.list.push({ id: d.id, bodyId: d.bodyId, name: d.name, since: this.year, first, lost: false, pop: 0, w: 0 });
+      this.log((first && d.first) || d.next || d.first, 'milestone').soft = true; // 실험실 연대기가 40줄 제한에 세지 않음
     }
     cleanShare() {
       let a = 0, b = 0;
@@ -1577,7 +1680,7 @@
       this.checkPeak(true);
       this.flushTechLoss();
       if (gone) { this.end('인류 멸종', `${this.lastCat ? this.lastCat.kind + ' 이후 ' : ''}남은 사람들도 버티지 못했습니다.`, OUT.extinct.label); return; }
-      if (star) { this.end('항성 간 문명', `${this.timeLabel()}, 인류의 후손이 다른 별로 떠났습니다.`, OUT.interstellar.label); return; }
+      if (star) { this.end('항성 간 문명', `${this.timeLabel()}, ${this.alien ? `${this.speciesName || '이 문명'}의 후손` : '인류의 후손'}이 다른 별로 떠났습니다.`, OUT.interstellar.label); return; }
       const label = this.outcomeText();
       this.end('관측 종료', `${this.timeLabel()}, 이 세계의 결말은 「${label}」입니다. 인구 ${ppl(this.worldPop)}, 나라 ${this.alive.length}개, 기온 ${fmtT(this.Tanom())}.`, label);
     }
@@ -1616,10 +1719,10 @@
   const bcText = (a) => (a % 10000 === 0 ? `기원전 ${a / 10000}만 년` : `기원전 ${a}년`);
   const yearText = (y) => { y = Math.round(y); return y < 0 ? bcText(-y) : `${y}년`; };
   const calText = (y) => { y = Math.round(y); return y < 0 ? bcText(-y) : `서기 ${Math.max(1, y)}년`; }; // 달력에는 0년이 없음
-  const ppl = (n) => WS.fmtCount(n) + ' 명'; // 띄어 쓴 '명'
+  const ppl = (n) => (WS.fmtCount(n) + ' 명').replace(/(\d) 명$/, '$1명'); // '4.39만 명'은 띄우고 '134명'은 붙임
   const pct = (v) => `${Math.round(v * 100)}%`;
   // 개입의 크기를 알 수 있게: '약 9,099만 명(인류의 1.1%)'
-  const tollText = (s, dead) => { const v = (dead / Math.max(1, s.earthPop)) * 100; return `약 ${ppl(dead)}(인류의 ${v >= 10 ? Math.round(v) : v >= 0.1 ? v.toFixed(1) : '0.1 미만'}%)`; };
+  const tollText = (s, dead) => { const v = (dead / Math.max(1, s.earthPop)) * 100; return `약 ${ppl(dead)}(${s.alien ? '전체' : '인류'}의 ${v >= 10 ? Math.round(v) + '%' : v >= 0.1 ? v.toFixed(1) + '%' : '0.1% 미만'})`; };
   const topPolity = (s) => { let t = null; for (const p of s.alive) if (!t || p.popSum > t.popSum) t = p; return t; };
   const warCount = (s) => { let n = 0; for (const p of s.alive) n += p.wars.size; return n / 2; };
   const eraOf = (s, p) => ERA[Math.min(ERA.length - 1, polEraIndex(s, p))];
@@ -2033,7 +2136,7 @@
     s._V = V; s._VW = W; s._VH = H;
     const M = s.map;
     ctx.drawImage(baseLayer(s, V, W, H, dpr), 0, 0, W, H);
-    const vmode = app ? app.view || 0 : 0;
+    const vmode = app && app.view !== SPACE_VIEW ? app.view || 0 : 0; // 태양계 뷰에서는 보통 여기로 오지 않음 (그릴 수 없을 때의 대비)
     const lp = landPath(s, V);
     ctx.save();
     ctx.beginPath(); ctx.rect(V.x0, V.y0, V.w, V.h); ctx.clip();
@@ -2075,6 +2178,7 @@
     ctx.beginPath(); ctx.rect(V.x0, V.y0, V.w, V.h); ctx.clip();
     const boxes = [];
     const badge = offworldBadge(ctx, s, V);
+    s._badge = badge; // 눌렀을 때 태양계 뷰로 가는 자리 (시각용, pick이 읽음)
     if (badge) boxes.push(badge);
     capitalsAndLabels(ctx, s, V, vmode, boxes);
     WS.drawFx(ctx, s, (lo, la) => [V.X(lo), V.Y(la), V.k]);
@@ -2086,9 +2190,11 @@
   }
   function offworldBadge(ctx, s, V) {
     if (!(s.offworld >= 1)) return null;
-    const txt = `지구 밖 정착민 ${ppl(s.offworld)}`;
     ctx.font = '600 12px "IBM Plex Sans KR", "Malgun Gothic", sans-serif';
-    const tw = ctx.measureText(txt).width;
+    const link = '태양계 보기'; // 누르면 태양계 뷰로 감 (pick)
+    let txt = `${s.settle.out} 정착민 ${ppl(s.offworld)} · `;
+    if (ctx.measureText(txt + link).width + 56 > V.w) txt = `정착민 ${ppl(s.offworld)} · `;
+    const tw = ctx.measureText(txt + link).width;
     const w = tw + 36, h = 26, x = V.x0 + V.w - w - 10, y = V.y0 + 10;
     ctx.fillStyle = 'rgba(9,11,17,0.86)'; roundRect(ctx, x, y, w, h, 13); ctx.fill();
     ctx.strokeStyle = 'rgba(216,168,91,0.4)'; ctx.lineWidth = 1; ctx.stroke();
@@ -2097,6 +2203,8 @@
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x + 15, y + 13, 7, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#f3eee2'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
     ctx.fillText(txt, x + 28, y + h / 2 + 0.5);
+    ctx.fillStyle = '#f1cb86';
+    ctx.fillText(link, x + 28 + ctx.measureText(txt).width, y + h / 2 + 0.5);
     ctx.textBaseline = 'alphabetic';
     return [x, y, w, h];
   }
@@ -2167,6 +2275,8 @@
 
   function pick(s, x, y, W, H) {
     const V = s._V && s._VW === W && s._VH === H ? s._V : view(s, W, H, null), M = s.map;
+    const bd = s._badge;
+    if (bd && s.offworld >= 1 && x >= bd[0] - 3 && x <= bd[0] + bd[2] + 3 && y >= bd[1] - 4 && y <= bd[1] + bd[3] + 4) return { goView: SPACE_VIEW };
     if (x < V.x0 || x >= V.x0 + V.w || y < V.y0 || y > V.y0 + V.h) return null;
     const lo = ((x - V.x0) / V.w) * 360 - 180, la = V.LA(y);
     if (la > V.latTop || la < V.latBot) return null;
@@ -2175,15 +2285,20 @@
   }
 
   /* ---------- 글로 보는 세계 ---------- */
+  // 하늘이 어두운 까닭이 핵전쟁이 아니라 운석인지 (글에만 씁니다)
+  function dustWinter(s) {
+    const last = s.impacts && s.impacts[s.impacts.length - 1];
+    return !!last && s.year - last.year < 20 && !(s.lastCat && s.lastCat.kind === '핵전쟁');
+  }
   function era(s) {
-    if (s.winter > 2) return { name: '핵겨울', sub: '재가 햇빛을 가려 농사가 무너졌습니다' };
+    if (s.winter > 2) return dustWinter(s) ? { name: '충돌의 겨울', sub: '운석 먼지가 햇빛을 가려 농사가 어려워졌습니다' } : { name: '핵겨울', sub: '재가 햇빛을 가려 농사가 무너졌습니다' };
     if (s.collapsed) return { name: '암흑기', sub: '인구가 크게 줄고 많은 지식이 흩어졌습니다' };
     if (s.agiOutcome === 'misaligned' && s.year - s.agiYear < 60) return { name: '초지능 재앙 이후', sub: '살아남은 사람들이 다시 일어서려 합니다' };
     const e = worldEraIndex(s);
     let sub = s.alien ? `${s.speciesName}의 역사` : e <= 0 ? '사냥과 채집으로 살아갑니다' : `가장 앞선 사회 기준 · 나라 ${s.alive.length}개`;
     if (s.agiOutcome === 'aligned') sub = '초지능이 인류를 돕고 있습니다';
     else if (s.agiOutcome === 'contained') sub = '초지능이 감시 속에 묶여 있습니다';
-    if (s.offworld >= 1 && s.offworld < SELF_SUSTAIN) sub = `지구 밖 첫 정착지에 ${ppl(s.offworld)}이 삽니다`;
+    if (s.offworld >= 1 && s.offworld < SELF_SUSTAIN) sub = `${s.settle.out} 첫 정착지에 ${ppl(s.offworld)}이 삽니다`;
     return { name: ERA[Math.min(ERA.length - 1, e)], sub };
   }
   function popTrend(s) {
@@ -2208,18 +2323,19 @@
     if (s.eraNow <= 5) return `나라 ${n}개, 세계 인구는 약 ${popTxt}입니다. 가장 큰 나라는 ${top.name}입니다.${warTxt}`;
     let first = `세계 인구 ${popTxt}, ${popTrend(s)}.`;
     let second;
-    if (s.winter > 1) second = ` 핵겨울로 하늘이 어둡고 농사가 무너졌습니다. 기온은 ${fmtT(T)}입니다.`;
+    if (s.winter > 1) second = (dustWinter(s) ? ' 운석 먼지로 하늘이 어둡고 농사가 어려워졌습니다.' : ' 핵겨울로 하늘이 어둡고 농사가 무너졌습니다.') + ` 기온은 ${fmtT(T)}입니다.`;
     else if (s.collapsed) second = ` 문명이 무너지는 시기입니다. 기온은 ${fmtT(T)}, 나라 ${n}개가 남았습니다.`;
     else {
       second = ` 기온은 ${fmtT(T)}`;
       second += wars >= 1 ? `, ${Math.round(wars)}곳에서 전쟁 중입니다.` : ', 큰 전쟁은 없습니다.';
       if (s.agiOutcome === 'aligned') second += ' 초지능이 연구와 살림을 돕습니다.';
       else if (s.agiOutcome === 'contained') second += ' 초지능은 감시 속에 묶여 있습니다.';
-      if (s.offworld >= SELF_SUSTAIN) second += ` 지구 밖에도 ${ppl(s.offworld)}이 삽니다.`;
+      if (s.offworld >= SELF_SUSTAIN) second += ` ${s.settle.out}에도 ${ppl(s.offworld)}이 삽니다.`;
     }
     return first + second;
   }
   function legend(s, v) {
+    if (v === SPACE_VIEW) return spaceLegend(s);
     if (v === 1) return [{ gradient: ['#18203a', '#463478', '#be5050', '#faaa50', '#fff4d2'], from: '1km²에 0.1명', to: '1,000명 이상', label: '인구 밀도' }, { color: '#06080e', label: '사람이 살지 않는 땅' }];
     if (v === 2) { const e = Math.min(ERA.length - 1, worldEraIndex(s)); return [{ gradient: ERA_COL.map((c) => WS.rgb(c)), from: '수렵채집', to: '항성 간 문명', label: '기술 시대' }, { color: WS.rgb(ERA_COL[e]), label: `지금 가장 앞선 곳: ${ERA[e]}` }]; }
     if (v === 3) return [{ gradient: ['#46b496', '#46505e', '#ecd678', '#f49640', '#d64232', '#78122a'], from: '오히려 이득', to: '심각한 피해', label: `기후 피해 (기온 ${fmtT(s.Tanom())})` }, { color: '#f49640', label: '해안은 해수면 상승 피해가 더해짐' }];
@@ -2249,10 +2365,11 @@
       ['가장 큰 나라', top ? top.name : '—'],
     ];
     if (s.firstTech.agi) rows.push(['초지능', s.agiOutcome === 'aligned' ? '인류와 협력' : s.agiOutcome === 'contained' ? '감시 속에 묶임' : '재앙', s.agiOutcome === 'misaligned' ? 'warn' : '']);
-    if (s.offworld >= 1) rows.push(['지구 밖 인구', ppl(s.offworld)]);
+    if (s.offworld >= 1) rows.push([`${s.settle.out} 인구`, ppl(s.offworld)]);
     return rows;
   }
   function inspect(s, w) {
+    if (w.goView != null) return ['태양계 보기', `${s.settle.out} 사람들이 어느 천체에 사는지 봅니다.`];
     const c = w.c, M = s.map;
     if (!M.land[c]) return ['바다'];
     if (!s.isLand[c]) return ['얼음 땅'];
@@ -2271,6 +2388,265 @@
     if (Math.abs(dm) > 0.01) lines.push(dm > 0 ? `기후 피해: 수확 ${Math.round(dm * (o >= 0 ? s.pols[o].adapt : 1) * 100)}% 감소${o >= 0 && s.pols[o].adapt < 0.95 ? ' (적응 후)' : ''}` : `기후 변화로 농사가 ${Math.round(-dm * 100)}% 쉬워짐`);
     lines.push(`${s.regionName(c)} · 이 칸 인구 ${ppl(s.pop[c])}`);
     return lines;
+  }
+
+  /* ---------- 태양계 뷰에 넘기는 장면 ---------- */
+  const SPACE_VIEW = 4; // views에서 '태양계'의 자리 (늘 마지막)
+  const yearOf = (s, y) => (s.alien ? s.labelAt(y) : yearText(y));
+  const homeEmpty = (s) => s.earthPop < 1e3 && s.offworld > 0; // 고향에는 사실상 아무도 없고 지구 밖에만 사람이 있음
+  // 실험실이 세계마다 받아 가는 요약 (값만 있어 Worker에서 그대로 전달됨)
+  function settleSummary(s) {
+    const S = s.settle, t = S.star;
+    return {
+      first: S.firstId,
+      list: S.list.map((e) => ({ id: e.id, name: e.name, pop: e.pop, since: e.since, lost: e.lost })),
+      star: t ? { target: t.target, ly: t.ly, year: t.year, speedC: t.speedC, arrive: t.arrive } : null,
+      homeEmpty: homeEmpty(s),
+    };
+  }
+  // 격자 값의 쌍선형 보간 (경도 방향은 이어짐)
+  function gridSamp(M, A, lo, la) {
+    const W = M.W, H = M.H, fx = ((lo + 180) / 360) * W - 0.5, fy = WS.clamp(((90 - la) / 180) * H - 0.5, 0, H - 1.001);
+    const x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0, xa = (x0 + W) % W, xb = (x0 + 1 + W) % W;
+    return (A[y0 * W + xa] * (1 - tx) + A[y0 * W + xb] * tx) * (1 - ty) + (A[(y0 + 1) * W + xa] * (1 - tx) + A[(y0 + 1) * W + xb] * tx) * ty;
+  }
+  // 땅 칸의 값을 넓게 번짐 (바다 칸은 값이 없으므로 무게를 함께 번져 나눔)
+  function* spreadLand(M, A) {
+    const W = M.W, H = M.H, NC = M.NC;
+    let V = new Float32Array(NC), K = new Float32Array(NC);
+    for (let c = 0; c < NC; c++) if (M.land[c]) { V[c] = A[c]; K[c] = 1; }
+    for (let pass = 0; pass < 3; pass++) {
+      const V2 = new Float32Array(NC), K2 = new Float32Array(NC);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        let sv = 0, sk = 0;
+        for (let dy = -2; dy <= 2; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= H) continue;
+          for (let dx = -2; dx <= 2; dx++) { const q = yy * W + ((x + dx + W) % W); sv += V[q]; sk += K[q]; }
+        }
+        V2[y * W + x] = sv / 25; K2[y * W + x] = sk / 25;
+        if (x === W - 1 && y % 8 === 7) yield;
+      }
+      V = V2; K = K2;
+    }
+    for (let c = 0; c < NC; c++) V[c] = K[c] > 1e-4 ? V[c] / K[c] : 0;
+    return V;
+  }
+  /* 둥근 지구의 땅 색: 지도와 같은 기후 자료를 넓게 번져 네모난 경계를 없애고, 추운 곳의 숲과 빙상을 더함 */
+  function* earthLandTex(M, T) {
+    const R = yield* spreadLand(M, M.rain);
+    const tw = 256, th = 128, cv = document.createElement('canvas');
+    cv.width = tw; cv.height = th;
+    const g = cv.getContext('2d'), img = g.createImageData(tw, th), d = img.data;
+    const nz = new WS.Noise(2027);
+    for (let py = 0, o = 0; py < th; py++) {
+      const la = 90 - ((py + 0.5) / th) * 180;
+      for (let px = 0; px < tw; px++, o += 4) {
+        const lo = -180 + ((px + 0.5) / tw) * 360;
+        const h = la > -60 && la < 84 ? WS.Earth.relief(lo, la) : 0, t = gridSamp(M, T, lo, la) - h * 14;
+        // 추운 내륙은 비가 적어도 증발이 적어 숲이 자람 (지도 자료로는 사막색이 됨)
+        let col = biomeCol(t + 5 * WS.smooth(12, 0, t), gridSamp(M, R, lo, la) + 0.55 * WS.smooth(12, 2, t));
+        const rock = WS.smooth(0.35, 0.9, h);
+        if (rock > 0) col = WS.mix(col, [132, 124, 112], rock * 0.6);
+        if (h > 0.72) col = WS.mix(col, [226, 230, 234], WS.smooth(0.72, 1, h) * 0.7);
+        const ice = la < -60 || (la > 60 && lo < -21 && lo > -55 - Math.max(0, la - 72) * 2.7); // 남극 대륙과 그린란드의 빙상
+        if (ice) col = [226, 232, 238];
+        const k = 0.98 + 0.28 * nz.fbm(lo * 0.09, la * 0.09, 5.2, 3);
+        d[o] = col[0] * k; d[o + 1] = col[1] * k; d[o + 2] = col[2] * k; d[o + 3] = 255;
+      }
+      yield;
+    }
+    g.putImageData(img, 0, 0);
+    return cv;
+  }
+  /* 둥근 행성 그림의 바탕 (지도마다 한 번): 바다, 대륙붕, 땅. 맨 윗줄이 북위 90°, 맨 왼쪽이 서경 180° */
+  const GLOBE_W = 512, GLOBE_H = 256;
+  // 오래 걸리므로 조금씩 나눠 만듭니다. 다 되면 M._globe가 채워집니다
+  function* globeBase(M) {
+    const w = GLOBE_W, h = GLOBE_H, n = w * h;
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    const tex = terrainTex(M);
+    const X = (lo) => ((lo + 180) / 360) * w, Y = (la) => ((90 - la) / 180) * h;
+    const ty = Y(M.earth ? LAT_TOP : 90), tb = Y(M.earth ? LAT_BOT : -90);
+    let lp = null;
+    if (M.polys) {
+      lp = new Path2D();
+      for (const pts of M.polys) {
+        lp.moveTo(X(pts[0][0]), Y(pts[0][1]));
+        for (let i = 1; i < pts.length; i++) lp.lineTo(X(pts[i][0]), Y(pts[i][1]));
+        lp.closePath();
+      }
+    }
+    const field = M.earth ? yield* spreadLand(M, M.temp) : M.temp;
+    const ltex = M.earth ? yield* earthLandTex(M, field) : null;
+    yield;
+    const land = () => {
+      g.save();
+      if (lp) { g.clip(lp); g.drawImage(ltex, 0, 0, w, h); g.drawImage(M._shadeTex, 0, ty, w, tb - ty); } // 지도와 같은 산 그림자
+      else g.drawImage(tex, 0, ty, w, tb - ty);
+      g.restore();
+    };
+    land();
+    yield;
+    const mask = g.getImageData(0, 0, w, h).data;
+    g.clearRect(0, 0, w, h);
+    const og = g.createLinearGradient(0, 0, 0, h);
+    og.addColorStop(0, '#0f2c4a'); og.addColorStop(0.3, '#123a63'); og.addColorStop(0.5, '#14457a'); og.addColorStop(0.7, '#123a63'); og.addColorStop(1, '#0f2c4a');
+    g.fillStyle = og; g.fillRect(0, 0, w, h);
+    g.save();
+    g.shadowColor = 'rgba(92,178,206,0.6)'; g.shadowBlur = 6;
+    if (lp) { g.fillStyle = '#1f4f6b'; g.fill(lp); } else g.drawImage(tex, 0, ty, w, tb - ty);
+    g.restore();
+    land();
+    yield;
+    const rgba = g.getImageData(0, 0, w, h).data;
+    yield;
+    const cellOf = new Int32Array(n), iceV = new Float32Array(n), spark = new Float32Array(n), isLand = new Uint8Array(n);
+    const nz = new WS.Noise(M.earth ? 4242 : 99);
+    for (let y = 0, i = 0; y < h; y++) {
+      const la = 90 - ((y + 0.5) / h) * 180, ca = Math.cos((la * Math.PI) / 180), sa = Math.sin((la * Math.PI) / 180);
+      const lat0 = 27 * Math.pow(ca, 1.5) - 8 * (1 - ca); // 바다 위 기온 근사 (지구 기후 계산과 같은 식)
+      const row = Math.min(M.H - 1, Math.floor((y / h) * M.H)) * M.W;
+      for (let x = 0; x < w; x++, i++) {
+        const lo = -180 + ((x + 0.5) / w) * 360, co = Math.cos((lo * Math.PI) / 180), so = Math.sin((lo * Math.PI) / 180);
+        const c = row + Math.min(M.W - 1, Math.floor((x / w) * M.W));
+        cellOf[i] = c;
+        // 얼음 경계는 위도를 따르되 땅과 물결무늬로 흐트러뜨림 (구면 위 노이즈라 이음매가 없음)
+        const wob = 6 * nz.fbm(ca * co * 4, ca * so * 4, sa * 4, 4);
+        isLand[i] = mask[i * 4 + 3] > 128 ? 1 : 0;
+        const tv = gridSamp(M, field, lo, la);
+        iceV[i] = (M.earth ? lat0 + (isLand[i] ? (tv - lat0) * 0.35 : 0) : tv) + wob;
+        // 불빛이 켜지는 문턱: 도시가 무리 지어 보이게 작은 노이즈를 섞음
+        spark[i] = WS.clamp(0.55 * hash32(x + 7, y * 977 + 13) + 0.45 * (0.5 - 2.2 * nz.fbm(ca * co * 16, ca * so * 16, sa * 16 + 9, 2)), 0.002, 1);
+      }
+      yield;
+    }
+    M._globe = { w, h, n, rgba, cellOf, iceV, spark, isLand };
+  }
+  // ms만큼만 더 만들고, 다 되었으면 true
+  function globeStep(M, ms) {
+    if (M._globe) return true;
+    if (typeof document === 'undefined') return false;
+    const job = M._globeJob || (M._globeJob = globeBase(M)), t0 = performance.now();
+    do { if (job.next().done) { M._globeJob = null; return true; } } while (performance.now() - t0 < ms);
+    return false;
+  }
+  /* 지금 상태의 표면: 얼음은 추우면 늘고 더우면 줄며, 밤의 불빛은 인구에서 나옵니다. 보이는 때에 물을 때만 다시 만듭니다 */
+  function homeSurface(s) {
+    const M = s.map;
+    if (!globeStep(M, 6)) return null;
+    const B = M._globe;
+    let G = s._surf;
+    if (!G) G = s._surf = { w: B.w, h: B.h, rgba: new Uint8ClampedArray(B.n * 4), lights: new Float32Array(B.n), ver: 0, year: NaN, hits: -1 };
+    if (G.year === s.year && G.hits === s.impactN) return G;
+    G.year = s.year; G.hits = s.impactN; G.ver++;
+    const T = s.Tanom(), thr = M.earth ? -0.9 + 1.44 * (1.4 - T) : -5 + 1.2 * (s.T0 - T);
+    const src = B.rgba, out = G.rgba, iv = B.iceV;
+    for (let i = 0, o = 0; i < B.n; i++, o += 4) {
+      let a = (thr + 1 - iv[i]) * 0.5;
+      a = a < 0 ? 0 : a > 0.96 ? 0.96 : a;
+      out[o] = src[o] + (232 - src[o]) * a; out[o + 1] = src[o + 1] + (238 - src[o + 1]) * a; out[o + 2] = src[o + 2] + (244 - src[o + 2]) * a; out[o + 3] = 255;
+    }
+    // 칸마다 불빛 세기: 인구 밀도의 로그, 전기가 없는 사회는 희미한 등불
+    const cl = G.cl || (G.cl = new Float32Array(M.NC)), pop = s.pop, area = M.area, owner = s.owner, pols = s.pols, elec = TI.elec;
+    cl.fill(0);
+    for (const c of s.landCells) {
+      if (pop[c] < 1) continue;
+      const o = owner[c], t = (Math.log10(pop[c] / area[c]) - 0.1) / 2.5;
+      if (t > 0) cl[c] = 0.8 * Math.pow(t > 1 ? 1 : t, 1.4) * (o >= 0 && pols[o].known[elec] ? 1 : 0.12);
+    }
+    const lights = G.lights, cellOf = B.cellOf, spark = B.spark, isL = B.isLand;
+    for (let i = 0; i < B.n; i++) {
+      const v = isL[i] ? cl[cellOf[i]] : 0;
+      lights[i] = v > spark[i] ? Math.min(1, 0.3 + (v - spark[i]) * 2.4) : 0;
+    }
+    return G;
+  }
+  function spaceScene(s) {
+    // 같은 해 안에서는 달라질 것이 없음 (운석만 걸음 사이에 떨어질 수 있음)
+    if (s._scn && s._scnYear === s.year && s._scnHits === s.impactN) return s._scn;
+    const S = s.settle, sys = S.sys, home = sys.bodies.find((b) => b.home), off = s.offworld, empty = homeEmpty(s);
+    const live = S.list.filter((e) => e.lost === false);
+    const settlements = S.list.map((e) => (e.lost === false
+      ? { id: e.id, bodyId: e.bodyId, name: e.name, pop: e.pop, popText: ppl(e.pop), since: e.since, sinceText: `${yearOf(s, e.since)}부터`, lost: false, lostText: null, first: e.first }
+      : { id: e.id, bodyId: e.bodyId, name: e.name, pop: 0, popText: '', since: e.since, sinceText: '', lost: true, lostText: `${yearOf(s, e.lost)}에 사라짐`, first: e.first }));
+    const t = S.star;
+    const canLaunch = s.earthPop > 0.5 * s.crashRef && s.knownShare[TI.space] > 0.05;
+    const traffic = live.length ? WS.clamp((Math.log10(off + 1) - 1.5) / 7, 0, 1) * (canLaunch ? 1 : 0.25) : 0;
+    let caption = yearOf(s, s.year);
+    if (live.length) caption += ` · ${S.out} 인구 ${ppl(off)}`;
+    else if (S.allLost) caption += ` · ${S.out} 정착지가 모두 사라졌습니다`;
+    s._scn = {
+      key: s.alien ? `sys:${s.seed}` : 'solar',
+      star: sys.star,
+      bodies: sys.bodies,
+      belt: sys.belt,
+      home: {
+        id: home.id, name: home.name,
+        atmosphere: [120, 170, 255],
+        surface: s._surfFn || (s._surfFn = () => homeSurface(s)),
+        dust: WS.clamp(1 - Math.exp(-s.winter / 2.5), 0, 1),
+        popText: s.earthPop >= 1 ? `인구 ${ppl(s.earthPop)}` : null,
+        sats: !!s.firstTech.space,
+      },
+      bombard: 0,
+      hidden: sys.hidden || 0,
+      listTitle: s.alien ? '이 문명이 간 곳' : '인류가 간 곳',
+      impacts: s.impacts.slice(-8).map((q) => ({ n: q.n, D: q.D, lo: q.lo, la: q.la, user: true, title: '운석 충돌', sub: `${yearOf(s, q.year)} · ${q.dead >= 1 ? `약 ${ppl(q.dead)}이 목숨을 잃었습니다` : '사람이 없는 곳에 떨어졌습니다'}` })),
+      settlements,
+      traffic,
+      interstellar: t ? { target: t.target, ly: t.ly, text: s.alien ? `${yearOf(s, t.year)} 출발 · 약 ${Math.round(t.arrive - t.year).toLocaleString('ko-KR')}년 뒤 도착 예정` : `${yearOf(s, t.year)} 출발 · 약 ${yearOf(s, t.arrive)} 도착 예정` } : null,
+      homeEmpty: empty,
+      caption,
+      emptyNote: S.list.length || t ? null : `아직 ${S.out}으로 나간 ${s.alien ? '이가' : '사람이'} 없습니다.`,
+    };
+    s._scnYear = s.year; s._scnHits = s.impactN;
+    return s._scn;
+  }
+  // 태양계 천체의 사실: [거리, 중력(지구 = 100)]
+  const BODY_FACT = {
+    mercury: ['태양에서 5,800만 km', 38], venus: ['태양에서 1억 800만 km', 90], earth: ['태양에서 1억 5,000만 km', 100], moon: ['지구에서 38만 km', 17],
+    mars: ['태양에서 2억 2,800만 km', 38], ceres: ['태양에서 4억 1,400만 km', 3], jupiter: ['태양에서 7억 7,800만 km', 253], europa: ['목성에서 67만 km', 13], ganymede: ['목성에서 107만 km', 15],
+    saturn: ['태양에서 14억 3,000만 km', 106], titan: ['토성에서 122만 km', 14], uranus: ['태양에서 28억 7,000만 km', 89], neptune: ['태양에서 45억 km', 114], triton: ['해왕성에서 35만 km', 8],
+  };
+  function spaceInspect(s, id) {
+    const S = s.settle, sys = S.sys;
+    if (id === 'sun' || id === 'star') return [sys.star.name, '행성들을 붙잡아 두고 빛과 열을 보내는 별입니다.'];
+    const b = sys.bodies.find((q) => q.id === id);
+    if (!b) return null;
+    const lines = [b.name], home = sys.bodies.find((q) => q.home);
+    // 실제 값 표는 태양계에서만 씁니다 (다른 별의 '달'이나 무작위 행성의 이웃은 이름과 자리만 같음)
+    const F = S.out === '지구 밖' ? BODY_FACT[id] : null;
+    if (F) lines.push(b.home ? F[0] : `${F[0]} · 중력은 지구의 ${F[1]}%`);
+    else if (b.parent) lines.push(`${sys.bodies.find((q) => q.id === b.parent).name} 둘레를 도는 위성입니다.`);
+    else if (!b.home) {
+      const ra = b.a / home.a, far = Math.abs(Math.log(ra)) < 0.05 ? '고향 행성과 거의 같은 궤도' : ra >= 1 ? `고향 행성보다 ${ra.toFixed(1)}배 먼 궤도` : `고향 행성보다 ${(1 / ra).toFixed(1)}배 가까운 궤도`;
+      const gv = b.m > 0 && home.m > 0 ? Math.pow(b.m / home.m, 0.46) : 0; // 표면 중력 ∝ 질량^0.46 (반지름 ∝ 질량^0.27)
+      lines.push(gv ? `${far} · 중력은 고향 행성의 ${gv >= 2 ? `약 ${gv.toFixed(1)}배` : `약 ${Math.round(gv * 100)}%`}` : far);
+    }
+    const e = S.list.find((q) => q.bodyId === id), d = S.dest.find((q) => q.bodyId === id);
+    if (b.home) {
+      lines.push(homeEmpty(s) ? '고향 행성에는 아무도 남지 않았습니다.' : `${s.alien ? '이 문명' : '사람들'}의 고향 · 인구 ${ppl(s.earthPop)} · 기온 변화 ${fmtT(s.Tanom())}`);
+    } else if (d) lines.push(`${s.alien ? '이 문명이' : '사람들이'} ${e || s.firstTech.mars ? '가는' : '갈 만한'} 이유: ${d.why}`);
+    else if (b.giant || ['jupiter', 'saturn', 'uranus', 'neptune'].includes(b.look)) lines.push('단단한 땅이 없어 내려설 수 없습니다.');
+    if (e) lines.push(e.lost === false ? `${b.home ? '궤도 도시 인구' : s.alien ? '인구' : '사는 사람'} ${ppl(e.pop)} · ${yearOf(s, e.since)}부터` : `${yearOf(s, e.since)}에 세운 정착지가 ${yearOf(s, e.lost)}에 사라졌습니다.`);
+    else if (d && !b.home) lines.push(s.alien ? '아직 정착지가 없습니다.' : '아직 아무도 살지 않습니다.');
+    return lines;
+  }
+  // 지도 위에서 충돌 지점의 자리 (작은 창이 그곳을 가리지 않게)
+  function spaceSite(s, imp, W, H) {
+    const V = s._V && s._VW === W && s._VH === H ? s._V : null;
+    return V && imp.lo != null ? [V.X(imp.lo), V.Y(imp.la)] : null;
+  }
+  function spaceLegend(s) {
+    // 정착지 이름과 인구는 그림 안의 목록이 보여 줍니다. 범례는 표시법만 짧게 (행 수가 늘지 않아 궤도가 들썩이지 않음)
+    const S = s.settle, home = S.sys.bodies.find((b) => b.id === S.homeId);
+    return [
+      S.allLost ? { color: '#6f7784', label: '회색 고리 = 정착지가 사라진 곳' } : { color: '#f1cb86', label: s.alien ? '고리 = 정착지가 있는 곳' : '고리 = 사람이 사는 곳' },
+      { color: '#5b9bd5', label: `밝게 표시한 행성 = ${home.name} (고향)` },
+    ];
   }
 
   /* ---------- 실험 설정 ---------- */
@@ -2374,6 +2750,7 @@
     },
     // 역사의 우연(난수의 흐름)이 매 단계 세계의 정확한 사람 수에 따라 달라짐: 개입 뒤에 '같은 주사위'를 유지할 수 없음
     chanceCoupled: true,
+    extra: settleSummary, // 어느 천체로 갔는지 (결말·통계와 무관한 표현 모형)
     eventIds: ['warm2', 'warm3', 'pandemic', 'nuclearwar', 'agi', 'fusion', 'mars', 'peak', 'collapse', 'agri', 'writing', 'steam', 'fission', 'internet'],
     eventIdsFor: (opts) => (opts && opts.start === 'ad2026' ? ['warm2', 'warm3', 'pandemic', 'nuclearwar', 'agi', 'fusion', 'mars', 'peak', 'collapse']
       : opts && (opts.start === 'ad1900' || opts.start === 'ad1500') ? ['steam', 'fission', 'space', 'internet', 'ai', 'pop8b', 'warm2', 'nuclearwar', 'pandemic']
@@ -2454,7 +2831,8 @@
     baseRate: 10,
     sampleEvery: 4,
     powerRegenSec: 7,
-    views: ['나라', '인구', '기술', '기후 피해'],
+    views: ['나라', '인구', '기술', '기후 피해', '태양계'],
+    space: { view: SPACE_VIEW, scene: spaceScene, inspect: spaceInspect, impactSeq: (s) => s.impactN, site: spaceSite, prepare: function* (s) { while (!globeStep(s.map, 1)) yield; } },
     create: (opts, seed, inherit) => new Civ(opts, seed, inherit),
     step: (s) => { s.tick(); },
     render,
@@ -2539,9 +2917,12 @@
           }
           s.winter += 1.5;
           s.lastCat = { year: s.year, kind: '운석 충돌' };
+          s.impactN++;
+          s.impacts.push({ n: s.impactN, year: s.year, D: null, lo: w.lo, la: w.la, dead });
+          if (s.impacts.length > 16) s.impacts.shift();
           s.addFx({ type: 'flash', x: w.lo, y: w.la, r: 10, life: 1.6, color: [255, 210, 150] });
           s.addFx({ type: 'ring', x: w.lo, y: w.la, r: 25, r0: 3, life: 2, color: [255, 150, 90] });
-          return `운석이 떨어져 ${tollText(s, dead)}이 목숨을 잃었습니다`;
+          return dead >= 1 ? `운석이 떨어져 ${tollText(s, dead)}이 목숨을 잃었습니다` : '운석이 사람이 없는 곳에 떨어졌습니다';
         },
       },
       {
@@ -2568,7 +2949,7 @@
           + (s.alien ? `<b>${esc(s.speciesName || '지성 종')}</b>의 문명 · ${esc(s.planetName || '')}<br>` : '')
           + `세계 인구 <b>${esc(ppl(s.worldPop))}</b> · 기온 <b>${esc(fmtT(s.Tanom()))}</b> · CO₂ ${Math.round(s.co2)} ppm<br>`
           + `국제 협력 ${pct(s.coop)} · 청정 에너지 ${pct(s.cleanShare())} · 핵탄두 ${esc(WS.fmtCount(wh, '발'))}`
-          + (s.offworld >= 1 ? ` · 지구 밖 ${esc(ppl(s.offworld))}` : '') + `</div></div>`;
+          + (s.offworld >= 1 ? ` · ${s.settle.out} ${esc(ppl(s.offworld))}` : '') + `</div></div>`;
         el.innerHTML = head + '<div class="extra-list">' + top.map((p) => {
           const wars = p.wars.size ? ` · 전쟁: ${[...p.wars.keys()].map((q) => esc(s.pols[q].name)).join(', ')}` : '';
           const demo = p.modern && p.tfr !== undefined ? ` · 출산율 ${p.tfr.toFixed(1)}` : '';

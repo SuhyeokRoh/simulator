@@ -1807,6 +1807,7 @@
         inherit: {
           name: p.name, mass: p.m, water: p.w, hzPos: (p.a - s.hzIn) / (s.hzOut - s.hzIn), starMass: s.Mstar, starLife: s.life,
           moon: p.moons > 0, giant: (s.plist || []).some((q) => q.m >= 50 && q.a > p.a), ecc: p.e,
+          system: { star: { mass: s.Mstar }, home: p.name, planets: (s.plist || []).map((q) => ({ name: q.name, a: q.a, au: q.aAU, m: q.m, w: q.w, e: q.e, moons: q.moons })) },
         },
       };
     },
